@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EORE Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+/* =========================== CONFIG ===========================
+   viewUrl: the PUBLIC VIEW printed by the notebook, ending in /FeatureServer.
+   Leave it empty to preview the dashboard with demo data (demo-data.js). */
+window.CONFIG = {
+  viewUrl: "https://services1.arcgis.com/9pLtiug18wgR3gBR/arcgis/rest/services/EORE_Public_Summary/FeatureServer",
+  tables: { summary: 0, breakdown: 1, coverage: 2, meta: 3 },
+  title: "Explosive Ordnance Risk Education",
+  subtitle: "EORE activities and people reached",
+  country: "Syria",
+  filterLabels: { implementing_org: "Team", donor: "Donor" }
+};
+</script>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f3f2ee;
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --on-s1: #fff; --on-s2: #fff; --on-s3: #fff; --on-s4: #0b0b0b;
+  --s1-wash: rgba(42,120,214,0.10); --hover: rgba(11,11,11,0.04);
+  --banner: #fff7e0; --banner-ink: #6b4b00;
+  --shadow: 0 1px 2px rgba(11,11,11,0.04), 0 4px 16px rgba(11,11,11,0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321;
+    --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --on-s1: #fff; --on-s2: #fff; --on-s3: #fff; --on-s4: #fff;
+    --s1-wash: rgba(57,135,229,0.14); --hover: rgba(255,255,255,0.05);
+    --banner: #2b2410; --banner-ink: #f3d68a;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321;
+  --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --on-s1: #fff; --on-s2: #fff; --on-s3: #fff; --on-s4: #fff;
+  --s1-wash: rgba(57,135,229,0.14); --hover: rgba(255,255,255,0.05);
+  --banner: #2b2410; --banner-ink: #f3d68a;
+  --shadow: none;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.wrap { max-width: 1320px; margin: 0 auto; padding: 28px 24px 48px; }
+header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--s1); margin: 0 0 6px; }
+h1 { font-size: 28px; line-height: 1.15; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+.sub { color: var(--ink-2); margin: 6px 0 0; }
+.updated { color: var(--muted); font-size: 12px; }
+.theme-btn, .btn { font: inherit; font-size: 13px; color: var(--ink-2); background: var(--surface); border: 1px solid var(--ring);
+  border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+.theme-btn:hover, .btn:hover { background: var(--hover); color: var(--ink); }
+.banner { background: var(--banner); color: var(--banner-ink); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; }
+.banner[hidden] { display: none; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 20px; }
+.filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.filters select { font: inherit; font-size: 14px; color: var(--ink); background: var(--surface); border: 1px solid var(--ring);
+  border-radius: 8px; padding: 7px 30px 7px 10px; min-width: 150px; appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+.grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--ring); border-radius: 14px; padding: 18px 20px; box-shadow: var(--shadow); min-width: 0; transition: opacity .2s; }
+.span-12 { grid-column: span 12; } .span-8 { grid-column: span 8; } .span-7 { grid-column: span 7; } .span-6 { grid-column: span 6; }
+.span-5 { grid-column: span 5; } .span-4 { grid-column: span 4; }
+@media (max-width: 1000px) { .span-8, .span-7, .span-6, .span-5, .span-4 { grid-column: span 12; } }
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.card h2 { font-size: 15px; font-weight: 600; margin: 0; }
+.card .note { font-size: 12px; color: var(--muted); margin: 2px 0 0; }
+.card-tools { display: flex; gap: 6px; flex-shrink: 0; }
+.seg { display: inline-flex; border: 1px solid var(--ring); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-size: 12px; border: 0; background: transparent; color: var(--ink-2); padding: 5px 10px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--s1-wash); color: var(--ink); font-weight: 600; }
+.tbl-btn { font: inherit; font-size: 12px; border: 1px solid var(--ring); background: transparent; color: var(--ink-2); padding: 5px 10px; border-radius: 8px; cursor: pointer; }
+.tbl-btn:hover, .seg button:hover { background: var(--hover); }
+
+/* Hero + tiles */
+.hero { display: grid; grid-template-columns: 1fr; gap: 18px; }
+.hero-label { font-size: 13px; color: var(--ink-2); margin: 0; }
+.hero-value { font-size: 56px; line-height: 1; font-weight: 650; letter-spacing: -.02em; margin: 6px 0 4px; }
+.hero-meta { color: var(--muted); font-size: 13px; }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+@media (max-width: 1200px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+
+.tile { background: var(--surface); border: 1px solid var(--ring); border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow); }
+.tile .label { font-size: 13px; color: var(--ink-2); }
+.tile .value { font-size: 26px; font-weight: 650; margin: 6px 0 2px; letter-spacing: -.01em; }
+.tile .meta { font-size: 12px; color: var(--muted); }
+.tile.aside { background: var(--surface-2); }
+
+/* Segmented bar */
+.segbar { display: flex; gap: 2px; height: 28px; }
+.segbar > div { border-radius: 4px; display: flex; align-items: center; padding: 0 8px; min-width: 0; cursor: default; outline-offset: 2px; }
+.segbar > div:hover, .segbar > div:focus-visible { filter: brightness(1.08); }
+.segbar span { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-2); margin-top: 10px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.legend b { color: var(--ink); font-weight: 600; margin-left: 4px; }
+
+/* Bars */
+.rows { display: grid; gap: 8px; }
+.row { display: grid; grid-template-columns: minmax(90px, 42%) 1fr; align-items: center; gap: 12px; border-radius: 6px; padding: 2px 4px; margin: 0 -4px; outline-offset: 1px; }
+.row:hover, .row:focus-visible { background: var(--hover); }
+.row .lab { font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .trk { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.row .bar { height: 14px; border-radius: 0 4px 4px 0; background: var(--s1); min-width: 2px; }
+.row .stack { display: flex; gap: 2px; height: 14px; min-width: 2px; }
+.row .stack > div { height: 100%; }
+.row .stack > div:last-child { border-radius: 0 4px 4px 0; }
+.row .val { font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.empty { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
+
+/* Column chart */
+svg text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+.colchart .hit { fill: transparent; cursor: default; outline: none; }
+.colchart .hit:hover + .col, .colchart .hit:focus + .col { opacity: .78; }
+
+/* Map */
+#map { height: 360px; border-radius: 10px; background: var(--surface-2); }
+.leaflet-container { font: inherit; }
+.leaflet-tooltip { background: var(--surface); color: var(--ink); border: 1px solid var(--ring); box-shadow: var(--shadow); border-radius: 8px; padding: 8px 10px; }
+.leaflet-tooltip::before { display: none; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--ink-2); border-bottom: 1px solid var(--axis); padding: 6px 8px; }
+td { border-bottom: 1px solid var(--grid); padding: 6px 8px; font-variant-numeric: tabular-nums; }
+td.num, th.num { text-align: right; }
+.tablewrap { max-height: 360px; overflow: auto; }
+
+/* Tooltip */
+#tip { position: fixed; pointer-events: none; z-index: 1000; background: var(--surface); color: var(--ink); border: 1px solid var(--ring);
+  box-shadow: 0 6px 24px rgba(0,0,0,.12); border-radius: 8px; padding: 8px 10px; font-size: 12px; min-width: 140px; opacity: 0; transition: opacity .08s; }
+#tip .t { color: var(--ink-2); margin-bottom: 4px; }
+#tip .r { display: flex; align-items: center; gap: 8px; }
+#tip .r i { width: 10px; height: 2px; border-radius: 1px; display: inline-block; }
+#tip .r b { font-weight: 650; }
+#tip .r span { color: var(--ink-2); }
+footer { margin-top: 28px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+footer b { color: var(--ink-2); font-weight: 600; }
+.loading .card, .loading .tile { opacity: .45; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header>
+    <div>
+      <p class="eyebrow" id="eyebrow">EORE · Syria</p>
+      <h1 id="title">Explosive Ordnance Risk Education</h1>
+      <p class="sub"><span id="subtitle"></span> <span class="updated" id="updated"></span></p>
+    </div>
+    <button class="theme-btn" id="themeBtn" type="button">Dark mode</button>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <div class="filters" id="filters">
+    <label>Year <select id="f-year"></select></label>
+    <label>Governorate <select id="f-governorate"></select></label>
+    <label><span id="l-implementing_org">Team</span> <select id="f-implementing_org"></select></label>
+    <label><span id="l-donor">Donor</span> <select id="f-donor"></select></label>
+    <button class="btn" id="reset" type="button">Reset filters</button>
+  </div>
+
+  <div class="grid">
+    <!-- Hero -->
+    <section class="card span-4" aria-labelledby="hero-label">
+      <div class="hero">
+        <div>
+          <p class="hero-label" id="hero-label">People reached directly in EORE sessions</p>
+          <p class="hero-value" id="k-benef">–</p>
+          <p class="hero-meta" id="k-benef-meta"></p>
+        </div>
+        <div>
+          <div class="segbar" id="sexage" role="img"></div>
+          <div class="legend" id="sexage-legend"></div>
+        </div>
+      </div>
+    </section>
+    <div class="span-8 tiles">
+      <div class="tile"><div class="label">Sessions delivered</div><div class="value" id="k-sessions">–</div><div class="meta" id="k-sessions-meta"></div></div>
+      <div class="tile"><div class="label">Reached for the first time</div><div class="value" id="k-first">–</div><div class="meta" id="k-first-meta"></div></div>
+      <div class="tile"><div class="label">Persons with disabilities</div><div class="value" id="k-dis">–</div><div class="meta" id="k-dis-meta"></div></div>
+      <div class="tile"><div class="label">Communities reached</div><div class="value" id="k-comm">–</div><div class="meta" id="k-comm-meta"></div></div>
+      <div class="tile"><div class="label">Sessions where EO was reported</div><div class="value" id="k-eo">–</div><div class="meta" id="k-eo-meta"></div></div>
+      <div class="tile"><div class="label">EORE materials distributed</div><div class="value" id="k-mat">–</div><div class="meta" id="k-mat-meta"></div></div>
+      <div class="tile"><div class="label">People trained (ToT, CFP)</div><div class="value" id="k-tot">–</div><div class="meta" id="k-tot-meta"></div></div>
+      <div class="tile aside"><div class="label">Media reach (indirect)</div><div class="value" id="k-mdm">–</div><div class="meta" id="k-mdm-meta"></div></div>
+    </div>
+
+    <!-- Trend + map -->
+    <section class="card span-7" data-card="trend">
+      <div class="card-head">
+        <div><h2>Over time</h2><p class="note" id="trend-note">Interpersonal sessions, by month of activity</p></div>
+        <div class="card-tools">
+          <div class="seg" role="group" aria-label="Measure">
+            <button type="button" data-metric="benef_total" aria-pressed="true">People reached</button>
+            <button type="button" data-metric="n_activities" aria-pressed="false">Sessions</button>
+          </div>
+          <button class="tbl-btn" type="button">Table</button>
+        </div>
+      </div>
+      <div class="chart" id="trend"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-5" data-card="map">
+      <div class="card-head">
+        <div><h2>Where people were reached</h2><p class="note">Circle size = people reached, by district (approximate location)</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart"><div id="map"></div></div><div class="table" hidden></div>
+    </section>
+
+    <!-- By governorate + venue -->
+    <section class="card span-7" data-card="gov">
+      <div class="card-head">
+        <div><h2>People reached by governorate</h2><p class="note">Girls, boys, women and men</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="legend" id="gov-legend" style="margin:0 0 12px"></div>
+      <div class="chart" id="gov"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-5" data-card="venue">
+      <div class="card-head">
+        <div><h2>Where sessions took place</h2><p class="note">Number of sessions by venue</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="venue"></div><div class="table" hidden></div>
+    </section>
+
+    <section class="card span-4" data-card="population">
+      <div class="card-head">
+        <div><h2>Who was reached</h2><p class="note">People reached by population group</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="population"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="stype">
+      <div class="card-head">
+        <div><h2>Type of session</h2><p class="note">Number of sessions by activity</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="stype"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="orgs">
+      <div class="card-head">
+        <div><h2>By team</h2><p class="note">People reached in sessions</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="orgs"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="age">
+      <div class="card-head">
+        <div><h2>Age groups</h2><p class="note">People reached by age and sex</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="legend" id="age-legend" style="margin:0 0 12px"></div>
+      <div class="chart" id="age"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="atrisk">
+      <div class="card-head">
+        <div><h2>At-risk and key groups</h2><p class="note">People reached in each group (as reported)</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="atrisk"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="dis">
+      <div class="card-head">
+        <div><h2>Persons with disabilities</h2><p class="note">Reached in sessions, by sex and age</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="dis"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="hazards">
+      <div class="card-head">
+        <div><h2>Hazards covered</h2><p class="note">Sessions covering each hazard type</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="hazards"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="media">
+      <div class="card-head">
+        <div><h2>Media and indirect EORE</h2><p class="note">Activities by channel</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="media"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="tot">
+      <div class="card-head">
+        <div><h2>Trainings (ToT and CFP)</h2><p class="note">People trained by type of training</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="tot"></div><div class="table" hidden></div>
+    </section>
+  </div>
+
+  <footer>
+    <b>How to read these figures.</b> “People reached” counts direct participants in interpersonal EORE sessions only.
+    Indirect (media) reach is an <b>estimate</b> and is shown separately, never added to people reached.
+    People trained in Training of Facilitators and Community Focal Point trainings are also counted separately. Only approved reports are included.
+    A session can cover several hazard types, so hazard counts can add up to more than the number of sessions. Group counts are as reported by teams.
+    Map locations are approximate district points. <span id="meta-line"></span>
+  </footer>
+</div>
+<div id="tip" role="tooltip"></div>
+<script src="demo-data.js" onerror="void 0"></script>
+<script>
+(() => {
+"use strict";
+const C = window.CONFIG;
+const IP = "Interpersonal EORE", MDM = "Digital and Mass Media EORE", TOT = "Training of Trainers", ALL = "All";
+const KEYS = ["year", "governorate", "implementing_org", "donor"];
+const SEX_AGE = [
+  { key: "girls", label: "Girls", v: "--s1", on: "--on-s1" },
+  { key: "boys",  label: "Boys",  v: "--s2", on: "--on-s2" },
+  { key: "women", label: "Women", v: "--s3", on: "--on-s3" },
+  { key: "men",   label: "Men",   v: "--s4", on: "--on-s4" },
+];
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const nf = new Intl.NumberFormat("en");
+const cf = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+const fmt = n => nf.format(Math.round(n || 0));
+const big = n => (n >= 100000 ? cf.format(n) : fmt(n));
+const pct = (a, b) => (b > 0 ? (100 * a / b) : 0);
+const pctTxt = (a, b) => (b > 0 ? `${pct(a, b) < 10 ? pct(a, b).toFixed(1) : Math.round(pct(a, b))}%` : "–");
+const $ = id => document.getElementById(id);
+const sum = (rows, k) => rows.reduce((s, r) => s + (+r[k] || 0), 0);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "style") e.style.cssText = v;
+    else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  }
+  for (const k of kids) if (k != null) e.append(k);
+  return e;
+}
+
+/* ---------------- tooltip ---------------- */
+const tip = $("tip");
+function showTip(evt, title, rows) {
+  tip.replaceChildren(el("div", { class: "t", text: title }),
+    ...rows.map(r => el("div", { class: "r" },
+      r.color ? el("i", { style: `background:var(${r.color})` }) : null,
+      el("b", { text: r.value }), el("span", { text: r.label }))));
+  let x, y;
+  if (evt.clientX != null && evt.type !== "focus") { x = evt.clientX; y = evt.clientY; }
+  else { const b = evt.target.getBoundingClientRect(); x = b.left + b.width / 2; y = b.top; }
+  tip.style.opacity = 1;
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x + 14)) + "px";
+  tip.style.top = Math.max(8, y - h - 12) + "px";
+}
+const hideTip = () => { tip.style.opacity = 0; };
+function hoverable(node, title, rows) {
+  node.tabIndex = 0;
+  const on = e => showTip(e, title, rows);
+  node.addEventListener("pointermove", on);
+  node.addEventListener("focus", on);
+  node.addEventListener("pointerleave", hideTip);
+  node.addEventListener("blur", hideTip);
+}
+
+/* ---------------- tables (every chart has one) ---------------- */
+const views = {};
+function setView(card, columns, rows) { views[card] = { columns, rows }; const c = document.querySelector(`[data-card="${card}"]`); if (c && !c.querySelector(".table").hidden) drawTable(card); }
+function drawTable(card) {
+  const box = document.querySelector(`[data-card="${card}"] .table`);
+  const v = views[card]; if (!v) return;
+  const thead = el("thead", {}, el("tr", {}, ...v.columns.map(c => el("th", { class: c.num ? "num" : "", text: c.label }))));
+  const tbody = el("tbody", {}, ...v.rows.map(r => el("tr", {}, ...v.columns.map(c => el("td", { class: c.num ? "num" : "", text: c.num ? fmt(r[c.key]) : String(r[c.key] ?? "") })))));
+  box.replaceChildren(el("div", { class: "tablewrap" }, el("table", {}, thead, tbody)));
+}
+document.querySelectorAll("[data-card] .tbl-btn").forEach(btn => btn.addEventListener("click", () => {
+  const card = btn.closest("[data-card]"), name = card.dataset.card;
+  const chart = card.querySelector(".chart"), table = card.querySelector(".table");
+  const toTable = table.hidden;
+  table.hidden = !toTable; chart.hidden = toTable;
+  btn.textContent = toTable ? "Chart" : "Table";
+  if (toTable) drawTable(name); else if (name === "map" && map) map.invalidateSize();
+}));
+
+/* ---------------- data loading ---------------- */
+async function fetchTable(id) {
+  const base = C.viewUrl.replace(/\/+$/, "");
+  const out = []; let offset = 0;
+  for (;;) {
+    const q = new URLSearchParams({ where: "1=1", outFields: "*", returnGeometry: "false", orderByFields: "OBJECTID",
+      resultOffset: offset, resultRecordCount: 2000, f: "json" });
+    const res = await fetch(`${base}/${id}/query?${q}`);
+    const j = await res.json();
+    if (j.error) throw new Error(j.error.message || "Query failed");
+    const feats = j.features || [];
+    out.push(...feats.map(f => f.attributes));
+    if (!j.exceededTransferLimit || !feats.length) break;
+    offset += feats.length;
+  }
+  return out;
+}
+const unpack = t => t.rows.map(r => Object.fromEntries(t.cols.map((c, i) => [c, r[i]])));
+async function load() {
+  if (C.viewUrl) {
+    const [summary, breakdown, coverage, meta] = await Promise.all(
+      ["summary", "breakdown", "coverage", "meta"].map(k => fetchTable(C.tables[k])));
+    return { summary, breakdown, coverage, meta: meta[0] || {}, demo: false };
+  }
+  if (window.EORE_DEMO) {
+    const d = window.EORE_DEMO;
+    return { summary: unpack(d.summary), breakdown: unpack(d.breakdown), coverage: unpack(d.coverage), meta: unpack(d.meta)[0], demo: true };
+  }
+  throw new Error("No data source. Set CONFIG.viewUrl in index.html.");
+}
+
+/* ---------------- filters ---------------- */
+const F = { year: ALL, governorate: ALL, implementing_org: ALL, donor: ALL };
+let DATA = null, trendMetric = "benef_total";
+const match = r => KEYS.every(k => F[k] === ALL || String(r[k]) === F[k]);
+function buildFilters() {
+  for (const k of KEYS) {
+    const vals = [...new Set(DATA.summary.map(r => String(r[k])))].sort((a, b) => k === "year" ? b.localeCompare(a) : a.localeCompare(b));
+    const sel = $("f-" + k);
+    sel.replaceChildren(el("option", { value: ALL, text: k === "year" ? "All years" : "All" }), ...vals.map(v => el("option", { value: v, text: v })));
+    sel.value = F[k];
+    sel.onchange = () => { F[k] = sel.value; render(); };
+  }
+  $("reset").onclick = () => { KEYS.forEach(k => { F[k] = ALL; $("f-" + k).value = ALL; }); render(); };
+}
+
+/* ---------------- components ---------------- */
+function segmentedBar(box, legendBox, parts, total, name) {
+  box.replaceChildren(); legendBox.replaceChildren();
+  box.setAttribute("aria-label", `${name}: ` + parts.map(p => `${p.label} ${fmt(p.value)} (${pctTxt(p.value, total)})`).join(", "));
+  if (!total) { box.append(el("div", { style: "flex:1;background:var(--grid)" })); }
+  for (const p of parts) {
+    legendBox.append(el("span", {}, el("i", { style: `background:var(${p.v})` }), p.label));
+    if (!p.value) continue;
+    const label = el("span", { text: pctTxt(p.value, total), style: `color:var(${p.on})` });
+    const block = el("div", { style: `flex:${p.value} 1 0;background:var(${p.v})` }, label);
+    hoverable(block, p.label, [{ value: fmt(p.value), label: `people · ${pctTxt(p.value, total)}`, color: p.v }]);
+    box.append(block);
+  }
+  requestAnimationFrame(() => box.querySelectorAll("span").forEach(s => {
+    s.style.visibility = (s.scrollWidth + 16 > s.parentElement.clientWidth) ? "hidden" : "visible";
+  }));
+}
+
+function rankedBars(box, items, { unit = "", max = 8, valueKey = "value", tipExtra } = {}) {
+  box.replaceChildren();
+  items = items.filter(d => d[valueKey] > 0).sort((a, b) => b[valueKey] - a[valueKey]);
+  if (!items.length) { box.append(el("div", { class: "empty", text: "No data for this selection" })); return; }
+  if (items.length > max) {
+    const rest = items.slice(max - 1);
+    items = items.slice(0, max - 1).concat([{ label: `Other (${rest.length})`, [valueKey]: sum(rest, valueKey),
+      extra: sum(rest, "extra") }]);
+  }
+  const top = Math.max(...items.map(d => d[valueKey]));
+  const rows = el("div", { class: "rows" });
+  for (const d of items) {
+    const row = el("div", { class: "row" },
+      el("div", { class: "lab", text: d.label, title: d.label }),
+      el("div", { class: "trk" }, el("div", { class: "bar", style: `width:calc((100% - 56px) * ${d[valueKey] / top})` }),
+        el("span", { class: "val", text: big(d[valueKey]) })));
+    const tipRows = [{ value: fmt(d[valueKey]), label: unit, color: "--s1" }];
+    if (tipExtra) tipRows.push(tipExtra(d));
+    hoverable(row, d.label, tipRows);
+    rows.append(row);
+  }
+  box.append(rows);
+}
+
+function stackedBars(box, items, series = SEX_AGE, { sort = true } = {}) {
+  box.replaceChildren();
+  items = items.filter(d => d.total > 0);
+  if (sort) items.sort((a, b) => b.total - a.total);
+  if (!items.length) { box.append(el("div", { class: "empty", text: "No data for this selection" })); return; }
+  const top = Math.max(...items.map(d => d.total));
+  const rows = el("div", { class: "rows" });
+  for (const d of items) {
+    const stack = el("div", { class: "stack", style: `width:calc((100% - 56px) * ${d.total / top})` },
+      ...series.filter(s => d[s.key] > 0).map(s => el("div", { style: `flex:${d[s.key]} 1 0;background:var(${s.v})` })));
+    const row = el("div", { class: "row" }, el("div", { class: "lab", text: d.label, title: d.label }),
+      el("div", { class: "trk" }, stack, el("span", { class: "val", text: big(d.total) })));
+    hoverable(row, `${d.label} · ${fmt(d.total)} people`,
+      series.map(s => ({ value: fmt(d[s.key]), label: `${s.label} (${pctTxt(d[s.key], d.total)})`, color: s.v })));
+    rows.append(row);
+  }
+  box.append(rows);
+}
+
+function niceMax(v) { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p; }
+function columnChart(box, items, unit) {
+  box.replaceChildren();
+  if (!items.length) { box.append(el("div", { class: "empty", text: "No data for this selection" })); return; }
+  const W = Math.max(280, box.clientWidth), H = 352, m = { t: 12, r: 8, b: 40, l: 44 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const ymax = niceMax(Math.max(...items.map(d => d.value)));
+  const band = iw / items.length, bw = Math.max(2, Math.min(24, band * 0.62));
+  const NS = "http://www.w3.org/2000/svg";
+  const s = (tag, a = {}) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const svg = s("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, class: "colchart", role: "img",
+    "aria-label": `${unit} by month` });
+  const tickFmt = v => (ymax >= 10000 ? cf.format(v) : nf.format(v));
+  for (let i = 0; i <= 4; i++) {
+    const v = ymax * i / 4, y = m.t + ih - ih * i / 4;
+    svg.append(s("line", { x1: m.l, x2: W - m.r, y1: y, y2: y, stroke: css(i ? "--grid" : "--axis"), "stroke-width": 1 }));
+    const t = s("text", { x: m.l - 8, y: y + 4, "text-anchor": "end" }); t.textContent = tickFmt(v); svg.append(t);
+  }
+  const every = Math.ceil(items.length / Math.max(1, Math.floor(iw / 44)));
+  items.forEach((d, i) => {
+    const x = m.l + band * i + (band - bw) / 2, h = ih * d.value / ymax, y = m.t + ih - h, r = Math.min(4, h, bw / 2);
+    const hit = s("rect", { x: m.l + band * i, y: m.t, width: band, height: ih, class: "hit", tabindex: 0 });
+    const col = h > 0 ? s("path", { class: "col", fill: css("--s1"),
+      d: `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + bw - r}Q${x + bw},${y} ${x + bw},${y + r}V${y + h}Z` }) : s("g");
+    svg.append(hit, col);
+    hoverable(hit, d.title, [{ value: fmt(d.value), label: unit, color: "--s1" }, ...(d.extra ? [d.extra] : [])]);
+    if (i % every === 0 || d.month === 1) {
+      const t = s("text", { x: m.l + band * i + band / 2, y: H - m.b + 16, "text-anchor": "middle" });
+      t.textContent = MONTHS[d.month - 1]; svg.append(t);
+    }
+    if (d.month === 1 || i === 0) {
+      const t = s("text", { x: m.l + band * i + band / 2, y: H - m.b + 31, "text-anchor": "middle", style: "fill:var(--ink-2);font-weight:600" });
+      t.textContent = d.year; svg.append(t);
+    }
+  });
+  box.append(svg);
+}
+
+/* ---------------- map ---------------- */
+let map = null, tiles = null, dots = null;
+function mapTheme() {
+  if (!map) return;
+  const dark = document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  if (tiles) tiles.remove();
+  tiles = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: "abcd", maxZoom: 12 }).addTo(map);
+}
+function drawMap(items) {
+  const box = $("map");
+  if (!window.L) { box.replaceChildren(el("div", { class: "empty", text: "Map could not load. Use the Table view." })); return; }
+  if (!map) {
+    map = L.map(box, { scrollWheelZoom: false, zoomControl: true, attributionControl: true }).setView([35, 38.5], 6);
+    mapTheme(); dots = L.layerGroup().addTo(map);
+  }
+  dots.clearLayers();
+  const pts = items.filter(d => d.lat != null && d.lon != null && d.value > 0);
+  if (!pts.length) return;
+  const top = Math.max(...pts.map(d => d.value));
+  const color = css("--s1"), ring = css("--surface");
+  pts.sort((a, b) => b.value - a.value).forEach(d => {
+    const c = L.circleMarker([d.lat, d.lon], { radius: 5 + 20 * Math.sqrt(d.value / top), color: ring, weight: 2,
+      fillColor: color, fillOpacity: 0.55 });
+    const t = document.createElement("div");
+    t.append(el("div", { style: "color:var(--ink-2);margin-bottom:2px", text: `${d.district}, ${d.governorate}` }),
+      el("div", {}, el("b", { text: fmt(d.value) }), " people reached"),
+      el("div", { style: "color:var(--ink-2)", text: `${fmt(d.sessions)} sessions` }));
+    c.bindTooltip(t, { direction: "top", offset: [0, -4] });
+    dots.addLayer(c);
+  });
+  map.fitBounds(L.latLngBounds(pts.map(d => [d.lat, d.lon])).pad(0.25), { maxZoom: 8 });
+}
+
+/* ---------------- render ---------------- */
+function groupBy(rows, keyFn, agg) {
+  const m = new Map();
+  for (const r of rows) { const k = keyFn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
+  return [...m].map(([k, rs]) => agg(k, rs));
+}
+function render() {
+  const rows = DATA.summary.filter(match);
+  const ip = rows.filter(r => r.activity_type === IP), mdm = rows.filter(r => r.activity_type === MDM), tot = rows.filter(r => r.activity_type === TOT);
+  const sessions = sum(ip, "n_activities"), benef = sum(ip, "benef_total");
+  const covKey = r => KEYS.every(k => String(r[k]) === F[k]);
+  const cov = DATA.coverage.find(covKey) || { n_governorates: 0, n_districts: 0, n_communities: 0 };
+
+  $("k-benef").textContent = fmt(benef);
+  $("k-benef-meta").textContent = sessions ? `in ${fmt(sessions)} sessions · ${(benef / sessions).toFixed(1)} people per session` : "No sessions for this selection";
+  $("k-sessions").textContent = fmt(sessions);
+  const newS = sum(ip, "new_sessions");
+  $("k-sessions-meta").textContent = sessions ? `${pctTxt(newS, sessions)} new · ${pctTxt(sessions - newS, sessions)} refresher` : "";
+  const first = sum(ip, "first_time");
+  $("k-first").textContent = fmt(first);
+  $("k-first-meta").textContent = `${pctTxt(first, benef)} of people reached`;
+  const dis = sum(ip, "dis_total");
+  $("k-dis").textContent = fmt(dis);
+  $("k-dis-meta").textContent = `${pctTxt(dis, benef)} of people reached · in ${pctTxt(sum(ip, "sessions_with_dis"), sessions)} of sessions`;
+  $("k-comm").textContent = fmt(cov.n_communities);
+  $("k-comm-meta").textContent = `in ${fmt(cov.n_districts)} districts, ${fmt(cov.n_governorates)} governorates`;
+  const eo = sum(ip, "eo_reported");
+  $("k-eo").textContent = fmt(eo);
+  $("k-eo-meta").textContent = `${pctTxt(eo, sessions)} of sessions · community reports of explosive ordnance`;
+  $("k-mat").textContent = big(sum(ip, "materials"));
+  $("k-mat-meta").textContent = `${big(sum(ip, "leaflets"))} leaflets · ${big(sum(ip, "booklets"))} booklets · ${big(sum(ip, "posters"))} posters · ${big(sum(ip, "other_materials"))} other`;
+  const trained = sum(tot, "tot_total");
+  $("k-tot").textContent = fmt(trained);
+  $("k-tot-meta").textContent = `${fmt(sum(tot, "n_activities"))} trainings · ${pctTxt(sum(tot, "tot_female"), trained)} female`;
+  const reach = sum(mdm, "mdm_reach");
+  $("k-mdm").textContent = big(reach);
+  $("k-mdm-meta").textContent = `estimated, ${fmt(sum(mdm, "n_activities"))} activities · not added to people reached`;
+
+  // sex & age
+  const sa = SEX_AGE.map(s => ({ ...s, value: sum(ip, s.key) }));
+  segmentedBar($("sexage"), $("sexage-legend"), sa, benef, "People reached by sex and age");
+  // legend with numbers on the hero
+  [...$("sexage-legend").children].forEach((n, i) => n.append(el("b", { text: pctTxt(sa[i].value, benef) })));
+
+  // trend
+  const byMonth = groupBy(ip, r => r.year * 100 + r.month, (k, rs) => ({ k, year: Math.floor(k / 100), month: k % 100,
+    benef_total: sum(rs, "benef_total"), n_activities: sum(rs, "n_activities") }));
+  const months = [];
+  if (byMonth.length) {
+    const ks = byMonth.map(d => d.k), lo = Math.min(...ks), hi = Math.max(...ks), idx = new Map(byMonth.map(d => [d.k, d]));
+    for (let y = Math.floor(lo / 100), mth = lo % 100; y * 100 + mth <= hi; mth === 12 ? (y++, mth = 1) : mth++) {
+      const d = idx.get(y * 100 + mth) || { year: y, month: mth, benef_total: 0, n_activities: 0 };
+      months.push({ ...d, year: y, month: mth });
+    }
+  }
+  const unit = trendMetric === "benef_total" ? "people reached" : "sessions";
+  columnChart($("trend"), months.map(d => ({ year: d.year, month: d.month, value: d[trendMetric], title: `${MONTHS[d.month - 1]} ${d.year}`,
+    extra: { value: fmt(trendMetric === "benef_total" ? d.n_activities : d.benef_total), label: trendMetric === "benef_total" ? "sessions" : "people reached" } })), unit);
+  setView("trend", [{ key: "period", label: "Month" }, { key: "n_activities", label: "Sessions", num: true }, { key: "benef_total", label: "People reached", num: true }],
+    months.map(d => ({ ...d, period: `${MONTHS[d.month - 1]} ${d.year}` })));
+
+  // map
+  const byDist = groupBy(ip, r => `${r.governorate}|${r.district}`, (k, rs) => ({ governorate: rs[0].governorate, district: rs[0].district,
+    lat: rs.find(r => r.district_lat != null)?.district_lat, lon: rs.find(r => r.district_lon != null)?.district_lon,
+    value: sum(rs, "benef_total"), sessions: sum(rs, "n_activities") }));
+  drawMap(byDist);
+  setView("map", [{ key: "governorate", label: "Governorate" }, { key: "district", label: "District" }, { key: "sessions", label: "Sessions", num: true }, { key: "value", label: "People reached", num: true }],
+    byDist.sort((a, b) => b.value - a.value));
+
+  // governorate stacked
+  const byGov = groupBy(ip, r => r.governorate, (k, rs) => ({ label: k, total: sum(rs, "benef_total"), ...Object.fromEntries(SEX_AGE.map(s => [s.key, sum(rs, s.key)])) }));
+  $("gov-legend").replaceChildren(...SEX_AGE.map(s => el("span", {}, el("i", { style: `background:var(${s.v})` }), s.label)));
+  stackedBars($("gov"), byGov);
+  setView("gov", [{ key: "label", label: "Governorate" }, ...SEX_AGE.map(s => ({ key: s.key, label: s.label, num: true })), { key: "total", label: "Total", num: true }],
+    [...byGov].sort((a, b) => b.total - a.total));
+
+  // breakdowns
+  const bd = DATA.breakdown.filter(match);
+  const dim = (name, act) => groupBy(bd.filter(r => r.dimension === name && (!act || r.activity_type === act)), r => r.category,
+    (k, rs) => ({ label: k, n: sum(rs, "n_activities"), people: sum(rs, "beneficiaries") }));
+  const bdView = (card, items, labelName, nName, pName = "People") => setView(card, [{ key: "label", label: labelName }, { key: "n", label: nName, num: true }, { key: "people", label: pName, num: true }], [...items].sort((a, b) => b.n - a.n));
+  const byPeople = (card, items, unit, extraLabel) => rankedBars($(card), items.map(d => ({ label: d.label, value: d.people, extra: d.n })), { unit, tipExtra: d => ({ value: fmt(d.extra), label: extraLabel }) });
+  const bySessions = (card, items, unit, extraLabel, extraFmt = fmt) => rankedBars($(card), items.map(d => ({ label: d.label, value: d.n, extra: d.people })), { unit, max: 10, tipExtra: d => ({ value: extraFmt(d.extra), label: extraLabel }) });
+
+  const venue = dim("session_conducted", IP);
+  bySessions("venue", venue, "sessions", "people reached"); bdView("venue", venue, "Venue", "Sessions");
+  const pop = dim("population_group", IP);
+  byPeople("population", pop, "people reached", "sessions"); bdView("population", pop, "Population group", "Sessions");
+  const st = dim("sub_activity", IP);
+  bySessions("stype", st, "sessions", "people reached"); bdView("stype", st, "Activity", "Sessions");
+  const risk = dim("at_risk_group", IP);
+  rankedBars($("atrisk"), risk.map(d => ({ label: d.label, value: d.people, extra: d.n })), { unit: "people reached", max: 14, tipExtra: d => ({ value: fmt(d.extra), label: "sessions" }) }); bdView("atrisk", risk, "Group", "Sessions");
+  const hz = dim("awareness_type_impacted_communities", IP);
+  bySessions("hazards", hz, "sessions", "people reached"); bdView("hazards", hz, "Hazard", "Sessions");
+  const med = dim("sub_activity", MDM);
+  bySessions("media", med, "activities", "estimated reach", big); bdView("media", med, "Channel", "Activities", "Estimated reach");
+  const tr = dim("re_category", TOT);
+  byPeople("tot", tr, "people trained", "trainings"); bdView("tot", tr, "Training", "Trainings", "People trained");
+
+  const orgs = groupBy(ip, r => r.implementing_org, (k, rs) => ({ label: k, value: sum(rs, "benef_total"), extra: sum(rs, "n_activities") }));
+  rankedBars($("orgs"), orgs, { unit: "people reached", max: 10, tipExtra: d => ({ value: fmt(d.extra), label: "sessions" }) });
+  setView("orgs", [{ key: "label", label: "Team" }, { key: "extra", label: "Sessions", num: true }, { key: "value", label: "People reached", num: true }], [...orgs].sort((a, b) => b.value - a.value));
+
+  // age groups
+  const AGE = [["Children 5–11", "children"], ["Youth 12–17", "youth"], ["Adults 18–59", "adult"], ["Elders 60+", "elder"]];
+  const SEX2 = [{ key: "f", label: "Female", v: "--s1" }, { key: "m", label: "Male", v: "--s2" }];
+  const ages = AGE.map(([label, k]) => { const f = sum(ip, k + "_f"), m = sum(ip, k + "_m"); return { label, f, m, total: f + m }; });
+  $("age-legend").replaceChildren(...SEX2.map(s => el("span", {}, el("i", { style: `background:var(${s.v})` }), s.label)));
+  stackedBars($("age"), ages, SEX2, { sort: false });
+  setView("age", [{ key: "label", label: "Age group" }, { key: "f", label: "Female", num: true }, { key: "m", label: "Male", num: true }, { key: "total", label: "Total", num: true }], ages);
+
+  // disability
+  const disParts = SEX_AGE.map(s => ({ ...s, value: sum(ip, "dis_" + s.key) }));
+  const disBox = $("dis"); disBox.replaceChildren();
+  if (dis) {
+    const sb = el("div", { class: "segbar" }), lg = el("div", { class: "legend" });
+    disBox.append(el("div", { style: "font-size:28px;font-weight:650;margin:0 0 10px" }, fmt(dis),
+      el("span", { style: "font-size:13px;font-weight:400;color:var(--ink-2);margin-left:8px", text: `${pctTxt(dis, benef)} of people reached` })), sb, lg);
+    segmentedBar(sb, lg, disParts, dis, "Persons with disabilities by sex and age");
+    [...lg.children].forEach((n, i) => n.append(el("b", { text: fmt(disParts[i].value) })));
+  } else disBox.append(el("div", { class: "empty", text: "No persons with disabilities reported for this selection" }));
+  setView("dis", [{ key: "label", label: "Group" }, { key: "value", label: "Persons with disabilities", num: true }], disParts);
+
+}
+
+/* ---------------- boot ---------------- */
+function applyThemeLabel() {
+  const dark = document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  $("themeBtn").textContent = dark ? "Light mode" : "Dark mode";
+  return dark;
+}
+$("themeBtn").onclick = () => {
+  const dark = applyThemeLabel();
+  document.documentElement.dataset.theme = dark ? "light" : "dark";
+  try { localStorage.setItem("eore-theme", document.documentElement.dataset.theme); } catch (e) {}
+  applyThemeLabel(); mapTheme(); if (DATA) render();
+};
+try { const t = localStorage.getItem("eore-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+applyThemeLabel();
+document.querySelectorAll("[data-metric]").forEach(b => b.addEventListener("click", () => {
+  trendMetric = b.dataset.metric;
+  document.querySelectorAll("[data-metric]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  render();
+}));
+let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => DATA && render(), 150); });
+
+for (const [k, v] of Object.entries(C.filterLabels || {})) { const n = $("l-" + k); if (n) n.textContent = v; }
+$("title").textContent = C.title; $("subtitle").textContent = C.subtitle; $("eyebrow").textContent = `EORE · ${C.country}`;
+document.title = `${C.title} · ${C.country}`;
+$("app").classList.add("loading");
+load().then(d => {
+  DATA = d;
+  if (d.demo) { const b = $("banner"); b.hidden = false; b.textContent = "Demo data: these numbers are made up. Set CONFIG.viewUrl in index.html to show your real figures."; }
+  const m = d.meta || {};
+  if (m.last_updated) $("updated").textContent = `· Updated ${new Date(m.last_updated).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+  if (m.first_activity) $("meta-line").textContent = `Activities from ${m.first_activity} to ${m.last_activity}.`;
+  buildFilters(); render();
+}).catch(err => {
+  const b = $("banner"); b.hidden = false; b.textContent = "Could not load data: " + err.message;
+}).finally(() => $("app").classList.remove("loading"));
+})();
+</script>
+</body>
+</html>
