@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EORE Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+/* =========================== CONFIG ===========================
+   viewUrl: the PUBLIC VIEW printed by the notebook, ending in /FeatureServer.
+   Leave it empty to preview the dashboard with demo data (demo-data.js). */
+window.CONFIG = {
+  viewUrl: "https://services1.arcgis.com/9pLtiug18wgR3gBR/arcgis/rest/services/EORE_Public_Summary/FeatureServer",
+  tables: { summary: 0, breakdown: 1, coverage: 2, meta: 3, points: 4 },
+  // NPA naming rule: 3-digit programme interim account + short name + country
+  title: "232 EORE Dashboard Syria",
+  subtitle: "EORE sessions and people reached",
+  country: "Syria",
+  // NPA logo: upload the logo file to the repository next to index.html and put its file name here
+  logo: "npa-logo.png",
+  filterLabels: { implementing_org: "Team", donor: "Donor" }
+};
+</script>
+<style>
+/* NPA Dashboard Guidelines (2023): light layout only, black text and numbers,
+   single-colour graphs in NPA dark green #007846, colours from Appendix A only. */
+:root {
+  color-scheme: light;
+  --page: #FFFFFF; --surface: #FFFFFF; --surface-2: #FFFFFF;
+  --ink: #000000; --ink-2: #000000; --muted: #000000;
+  --grid: #DDDDDD; --axis: #B2B2B2; --ring: #DDDDDD;
+  --green: #007846;                       /* NPA dark green: single-colour graphs */
+  --s1: #007846; --s2: #F28705; --s3: #047BC1; --s4: #66CC66;   /* girls, boys, women, men */
+  --on-s1: #FFFFFF; --on-s2: #000000; --on-s3: #FFFFFF; --on-s4: #000000;
+  --s1-wash: #DBEBD7; --hover: #DBEBD7;
+  --banner: #FFF3CC; --banner-ink: #000000;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.45 "Avenir Next", Avenir, "Segoe UI", system-ui, sans-serif; }
+.wrap { max-width: 1400px; margin: 0 auto; padding: 0 16px 40px; }
+
+/* Header: white, black text, NPA logo, filters (max 4) */
+.topbar { display: flex; align-items: stretch; background: #FFFFFF; border: 1px solid var(--ring); margin: 12px 0 12px; min-height: 64px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 12px; padding: 10px 16px; flex: 1 1 340px; min-width: 0; }
+.brand img { height: 40px; width: auto; display: block; }
+.brand img[hidden] { display: none; }
+h1 { font-size: 22px; line-height: 1.2; margin: 0; font-weight: 500; color: #000; }
+.sub { margin: 2px 0 0; font-size: 12px; color: #000; }
+.filters { display: flex; flex-wrap: wrap; align-items: stretch; }
+.filters label { display: flex; flex-direction: column; justify-content: center; gap: 2px; font-size: 12px; color: #000;
+  border-left: 1px solid var(--ring); padding: 8px 12px; min-width: 170px; }
+.filters select { font: inherit; font-size: 13px; color: #000; background: #FFFFFF; border: 1px solid var(--ring);
+  border-radius: 4px; padding: 5px 26px 5px 8px; appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #000 50%), linear-gradient(135deg, #000 50%, transparent 50%);
+  background-position: calc(100% - 13px) 50%, calc(100% - 8px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+.filters .reset { display: flex; align-items: center; border-left: 1px solid var(--ring); padding: 8px 12px; }
+.btn { font: inherit; font-size: 12px; color: #000; background: #FFFFFF; border: 1px solid var(--ring); border-radius: 4px; padding: 5px 10px; cursor: pointer; }
+.btn:hover { background: var(--hover); }
+.banner { background: var(--banner); color: var(--banner-ink); border: 1px solid #FECE00; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+.banner[hidden] { display: none; }
+
+.grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--ring); padding: 16px 18px; min-width: 0; transition: opacity .2s; }
+.span-12 { grid-column: span 12; } .span-8 { grid-column: span 8; } .span-6 { grid-column: span 6; }
+.span-4 { grid-column: span 4; } .span-3 { grid-column: span 3; }
+@media (max-width: 1000px) { .span-8, .span-6, .span-4 { grid-column: span 12; } .span-3 { grid-column: span 6; } }
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.card h2 { font-size: 15px; font-weight: 600; margin: 0; color: #000; }
+.card .note { font-size: 12px; color: #000; margin: 2px 0 0; }
+.card-tools { display: flex; gap: 6px; flex-shrink: 0; }
+.seg { display: inline-flex; border: 1px solid var(--ring); border-radius: 4px; overflow: hidden; }
+.seg button { font: inherit; font-size: 12px; border: 0; background: #FFFFFF; color: #000; padding: 5px 10px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--s1-wash); font-weight: 600; }
+.tbl-btn { font: inherit; font-size: 12px; border: 1px solid var(--ring); background: #FFFFFF; color: #000; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+.tbl-btn:hover, .seg button:hover { background: var(--hover); }
+
+/* KPI tiles: black number + NPA icon */
+.hero-label { font-size: 15px; color: #000; margin: 0; }
+.kpi { display: flex; align-items: center; gap: 12px; margin: 8px 0 4px; }
+.kpi img { height: 64px; width: auto; flex-shrink: 0; }
+.hero-value { font-size: 56px; line-height: 1; font-weight: 600; letter-spacing: -.01em; margin: 0; color: #000; }
+.hero-meta { color: #000; font-size: 13px; margin: 6px 0 14px; }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 1200px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+.tile { background: var(--surface); border: 1px solid var(--ring); padding: 14px 16px; min-width: 0; }
+.tile .label { font-size: 14px; color: #000; }
+.tile .kpi img { height: 40px; }
+.tile .value { font-size: 30px; font-weight: 600; color: #000; letter-spacing: -.01em; }
+.tile .meta { font-size: 12px; color: #000; }
+.tile.big .kpi img { height: 52px; }
+.tile.big .value { font-size: 40px; }
+
+/* Segmented bar */
+.segbar { display: flex; gap: 2px; height: 28px; }
+.segbar > div { border-radius: 2px; display: flex; align-items: center; padding: 0 8px; min-width: 0; cursor: default; outline-offset: 2px; }
+.segbar > div:hover, .segbar > div:focus-visible { filter: brightness(1.08); }
+.segbar span { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: #000; margin-top: 10px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.legend b { font-weight: 600; margin-left: 4px; }
+
+/* Bars */
+.rows { display: grid; gap: 8px; }
+.row { display: grid; grid-template-columns: minmax(90px, 42%) 1fr; align-items: center; gap: 12px; border-radius: 4px; padding: 2px 4px; margin: 0 -4px; outline-offset: 1px; }
+.row:hover, .row:focus-visible { background: var(--hover); }
+.row .lab { font-size: 13px; color: #000; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .trk { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.row .bar { height: 14px; border-radius: 0 3px 3px 0; background: var(--green); min-width: 2px; }
+.row .stack { display: flex; gap: 2px; height: 14px; min-width: 2px; }
+.row .stack > div { height: 100%; }
+.row .stack > div:last-child { border-radius: 0 3px 3px 0; }
+.row .val { font-size: 12px; color: #000; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.empty { color: #000; font-size: 13px; padding: 24px 0; text-align: center; }
+
+/* Column chart */
+svg text { fill: #000; font-size: 11px; font-family: inherit; }
+.colchart .hit { fill: transparent; cursor: default; outline: none; }
+.colchart .hit:hover + .col, .colchart .hit:focus + .col { opacity: .78; }
+
+/* Map */
+#map { height: 360px; background: #F2F2F2; }
+.leaflet-container { font: inherit; }
+.leaflet-tooltip { background: #FFFFFF; color: #000; border: 1px solid var(--ring); border-radius: 4px; padding: 8px 10px; }
+.leaflet-tooltip::before { display: none; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; font-size: 13px; color: #000; }
+th { text-align: left; font-weight: 600; border-bottom: 1px solid var(--axis); padding: 6px 8px; }
+td { border-bottom: 1px solid var(--grid); padding: 6px 8px; font-variant-numeric: tabular-nums; }
+td.num, th.num { text-align: right; }
+.tablewrap { max-height: 360px; overflow: auto; }
+
+/* Tooltip */
+#tip { position: fixed; pointer-events: none; z-index: 1000; background: #FFFFFF; color: #000; border: 1px solid var(--axis);
+  box-shadow: 0 4px 16px rgba(0,0,0,.12); border-radius: 4px; padding: 8px 10px; font-size: 12px; min-width: 140px; opacity: 0; transition: opacity .08s; }
+#tip .t { margin-bottom: 4px; }
+#tip .r { display: flex; align-items: center; gap: 8px; }
+#tip .r i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+#tip .r b { font-weight: 650; }
+footer { margin-top: 20px; color: #000; font-size: 12px; line-height: 1.6; }
+footer b { font-weight: 600; }
+.loading .card, .loading .tile { opacity: .45; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="topbar">
+    <div class="brand">
+      <img id="logo" alt="NPA logo" hidden>
+      <div>
+        <h1 id="title">232 EORE Dashboard Syria</h1>
+        <p class="sub"><span id="subtitle"></span> <span id="updated"></span></p>
+      </div>
+    </div>
+    <div class="filters" id="filters">
+      <label>Year <select id="f-year"></select></label>
+      <label>Governorate <select id="f-governorate"></select></label>
+      <label><span id="l-implementing_org">Team</span> <select id="f-implementing_org"></select></label>
+      <label><span id="l-donor">Donor</span> <select id="f-donor"></select></label>
+      <div class="reset"><button class="btn" id="reset" type="button">Reset</button></div>
+    </div>
+  </div>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <div class="grid">
+    <!-- Hero -->
+    <section class="card span-4" aria-labelledby="hero-label">
+      <p class="hero-label" id="hero-label">Total number of EORE beneficiaries</p>
+      <div class="kpi"><img data-icon="people" alt=""><p class="hero-value" id="k-benef">–</p></div>
+      <p class="hero-meta" id="k-benef-meta"></p>
+      <div class="segbar" id="sexage" role="img"></div>
+      <div class="legend" id="sexage-legend"></div>
+    </section>
+    <div class="span-8 tiles">
+      <div class="tile"><div class="label">Number of EORE sessions</div><div class="kpi"><img data-icon="sessions" alt=""><span class="value" id="k-sessions">–</span></div><div class="meta" id="k-sessions-meta"></div></div>
+      <div class="tile"><div class="label">Reached for the first time</div><div class="kpi"><img data-icon="first" alt=""><span class="value" id="k-first">–</span></div><div class="meta" id="k-first-meta"></div></div>
+      <div class="tile"><div class="label">Persons with disabilities</div><div class="kpi"><img data-icon="pwd" alt=""><span class="value" id="k-dis">–</span></div><div class="meta" id="k-dis-meta"></div></div>
+      <div class="tile"><div class="label">Communities reached</div><div class="kpi"><img data-icon="communities" alt=""><span class="value" id="k-comm">–</span></div><div class="meta" id="k-comm-meta"></div></div>
+      <div class="tile"><div class="label">Sessions where EO was reported</div><div class="kpi"><img data-icon="eo" alt=""><span class="value" id="k-eo">–</span></div><div class="meta" id="k-eo-meta"></div></div>
+      <div class="tile"><div class="label">EORE materials distributed</div><div class="kpi"><img data-icon="materials" alt=""><span class="value" id="k-mat">–</span></div><div class="meta" id="k-mat-meta"></div></div>
+      <div class="tile"><div class="label">People trained (ToT, CFP)</div><div class="kpi"><img data-icon="trained" alt=""><span class="value" id="k-tot">–</span></div><div class="meta" id="k-tot-meta"></div></div>
+      <div class="tile"><div class="label">Total indirect beneficiaries</div><div class="kpi"><img data-icon="media" alt=""><span class="value" id="k-mdm">–</span></div><div class="meta" id="k-mdm-meta"></div></div>
+    </div>
+    <div class="span-12 tiles" style="grid-template-columns:repeat(4,1fr)">
+      <div class="tile big"><div class="label">Total girls beneficiaries</div><div class="kpi"><img data-icon="girls" alt=""><span class="value" id="k-girls">–</span></div><div class="meta" id="k-girls-meta"></div></div>
+      <div class="tile big"><div class="label">Total boys beneficiaries</div><div class="kpi"><img data-icon="boys" alt=""><span class="value" id="k-boys">–</span></div><div class="meta" id="k-boys-meta"></div></div>
+      <div class="tile big"><div class="label">Total women beneficiaries</div><div class="kpi"><img data-icon="women" alt=""><span class="value" id="k-women">–</span></div><div class="meta" id="k-women-meta"></div></div>
+      <div class="tile big"><div class="label">Total men beneficiaries</div><div class="kpi"><img data-icon="men" alt=""><span class="value" id="k-men">–</span></div><div class="meta" id="k-men-meta"></div></div>
+    </div>
+
+    <!-- Trend + map -->
+    <section class="card span-6" data-card="trend">
+      <div class="card-head">
+        <div><h2>Over time</h2><p class="note" id="trend-note">Interpersonal sessions, by month of activity</p></div>
+        <div class="card-tools">
+          <div class="seg" role="group" aria-label="Measure">
+            <button type="button" data-metric="benef_total" aria-pressed="true">People reached</button>
+            <button type="button" data-metric="n_activities" aria-pressed="false">Sessions</button>
+          </div>
+          <button class="tbl-btn" type="button">Table</button>
+        </div>
+      </div>
+      <div class="chart" id="trend"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-6" data-card="map">
+      <div class="card-head">
+        <div><h2>Where people were reached</h2><p class="note" id="map-sub">Circle size = people reached, by district (approximate location)</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart"><div id="map"></div><p class="note" id="map-note" style="margin:8px 0 0"></p></div><div class="table" hidden></div>
+    </section>
+
+    <!-- By governorate + venue -->
+    <section class="card span-6" data-card="gov">
+      <div class="card-head">
+        <div><h2>People reached by governorate</h2><p class="note">Girls, boys, women and men</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="legend" id="gov-legend" style="margin:0 0 12px"></div>
+      <div class="chart" id="gov"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-6" data-card="venue">
+      <div class="card-head">
+        <div><h2>Where sessions took place</h2><p class="note">Number of sessions by venue</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="venue"></div><div class="table" hidden></div>
+    </section>
+
+    <section class="card span-4" data-card="population">
+      <div class="card-head">
+        <div><h2>Who was reached</h2><p class="note">People reached by population group</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="population"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="stype">
+      <div class="card-head">
+        <div><h2>Type of session</h2><p class="note">Number of sessions by activity</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="stype"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="orgs">
+      <div class="card-head">
+        <div><h2>By team</h2><p class="note">People reached in sessions</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="orgs"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="age">
+      <div class="card-head">
+        <div><h2>Age groups</h2><p class="note">People reached by age and sex</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="legend" id="age-legend" style="margin:0 0 12px"></div>
+      <div class="chart" id="age"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="atrisk">
+      <div class="card-head">
+        <div><h2>At-risk and key groups</h2><p class="note">People reached in each group (as reported)</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="atrisk"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="dis">
+      <div class="card-head">
+        <div><h2>Persons with disabilities</h2><p class="note">Reached in sessions, by sex and age</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="dis"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="hazards">
+      <div class="card-head">
+        <div><h2>Hazards covered</h2><p class="note">Sessions covering each hazard type</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="hazards"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="media">
+      <div class="card-head">
+        <div><h2>Media and indirect EORE</h2><p class="note">Activities by channel</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="media"></div><div class="table" hidden></div>
+    </section>
+    <section class="card span-4" data-card="tot">
+      <div class="card-head">
+        <div><h2>Trainings (ToT and CFP)</h2><p class="note">People trained by type of training</p></div>
+        <div class="card-tools"><button class="tbl-btn" type="button">Table</button></div>
+      </div>
+      <div class="chart" id="tot"></div><div class="table" hidden></div>
+    </section>
+  </div>
+
+  <footer>
+    <b>How to read these figures.</b> “People reached” counts direct participants in interpersonal EORE sessions only.
+    Indirect (media) reach is an <b>estimate</b> and is shown separately, never added to people reached.
+    People trained in Training of Facilitators and Community Focal Point trainings are also counted separately. Only approved reports are included.
+    A session can cover several hazard types, so hazard counts can add up to more than the number of sessions. Group counts are as reported by teams.
+    Map locations are approximate district points. <span id="meta-line"></span>
+  </footer>
+</div>
+<div id="tip" role="tooltip"></div>
+<script src="demo-data.js" onerror="void 0"></script>
+<script>
+(() => {
+"use strict";
+/* NPA dashboard icons (Appendix B of the NPA Dashboard Guidelines) */
+const ICONS = {"people": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDE2MS44IDE2OC42IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAxNjEuOCAxNjguNjsiIHhtbDpzcGFjZT0icHJlc2VydmUiPiA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPiAuc3Qwe2ZpbGw6IzAwQUEzMjt9IDwvc3R5bGU+IDxnPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTU1LjEsOTguNWMtMC41LTUtMS0xMC0xLjctMTVjLTEuMi04LTMuMi0xNS44LTYuOS0yMy4xYy0yLTQtNC41LTcuNi04LjItMTAuMWMtMS43LTEuMi0zLjUtMi4yLTUuNy0yLjIgYy01LjYsMC4xLTExLjMsMC4xLTE2LjksMGMtMi40LTAuMS00LjYsMC42LTYuNCwyYy0xLjcsMS40LTMuNCwyLjktNC44LDQuNmMtMi44LDMuMy00LjUsNy4yLTYsMTEuM2MtMy4yLDguNS00LjQsMTcuNC02LDI2LjMgYy0wLjcsMy42LTEuNCw3LjItMy4zLDEwLjVjLTEuMiwyLTIuNywzLjQtNS4zLDNjLTAuOC0wLjEtMS42LTAuMS0yLjQsMGMtMi4zLDAuMy0zLjgtMC45LTQuOS0yLjdjLTAuNy0xLjItMS40LTIuNC0xLjgtMy44IGMtMC44LTMuMi0xLjMtNi40LTIuMS05LjZjLTAuMi0wLjktMC45LTEuNy0xLjMtMi41Yy0wLjMtMC41LTAuNy0xLTAuOC0xLjZjLTAuNy00LjMtMS4xLTguNi0yLjEtMTIuOGMtMS45LTgtNS40LTE1LjMtMTEuNy0yMC45IGMtNy4yLTYuNS0xNS42LTguNy0yNC45LTUuN2MtNy4xLDIuMy0xMi4zLDcuMS0xNi4xLDEzLjNDMTAuNCw2OCw4LjYsNzcuNSw4LjIsODcuNGMtMC4xLDMuNywyLjQsNi42LDUuOSw2LjcgYzMuNCwwLjIsNi4xLTIuNSw2LjMtNi4yYzAuNS02LjMsMS42LTEyLjQsNC4xLTE4LjNjMC44LTEuOSwxLjktMy43LDIuOS01LjZjMC4xLDAuMSwwLjIsMC4xLDAuNCwwLjJDMjQuOSw4MC41LDIyLDk2LjcsMTksMTEzLjEgYzIsMCwzLjgsMCw1LjYsMGMwLDAuOCwwLDEuNCwwLDEuOWMwLDEyLjIsMCwyNC4zLDAsMzYuNWMwLDIsMC41LDMuOSwyLjEsNS4yYzIsMS43LDQuMiwyLDYuNiwxYzIuNC0xLjEsMy42LTMuMSwzLjYtNS43IGMwLTEyLjQsMC0yNC43LDAtMzcuMWMwLTAuNiwwLTEuMiwwLTEuOGMxLjgsMCwzLjQsMCw1LjIsMGMwLDAuNywwLDEuMywwLDEuOWMwLDEyLDAsMjMuOSwwLDM1LjljMCwwLjYsMCwxLjMsMC4xLDEuOSBjMC41LDMuNiwzLjUsNS45LDcuMSw1LjNjMy0wLjUsNS0zLDUtNi40YzAtMTIuMywwLTI0LjUsMC0zNi44YzAtMC42LDAtMS4yLDAtMmMyLDAsMy44LDAsNS43LDBjLTMtMTYuNC01LjktMzIuNS04LjgtNDguNyBjMC41LDAuMSwwLjcsMC40LDAuOCwwLjZjMC42LDEsMS4yLDIsMS43LDNjMy4xLDYuMiw0LjQsMTIuOSw0LjgsMTkuN2MwLjIsMy43LDIuMyw2LjIsNS42LDYuNWMwLjksMC4xLDEuOS0wLjEsMi45LTAuMiBjMC4zLDEuMiwwLjUsMi40LDAuOCwzLjZjMS4xLDQuNSwyLjcsOC44LDYuMywxMmMwLjcsMC42LDAuOSwxLjMsMC45LDIuMmMwLDE0LjEsMCwyOC4xLDAsNDIuMmMwLDAuNSwwLDEuMSwwLDEuNiBjMC4yLDEuNiwxLjYsMi44LDMuMiwyLjhjMS43LDAsMi45LTEuMiwzLjEtMi45YzAtMC41LDAtMSwwLTEuNWMwLTcsMC0xNCwwLTIwLjljMC0wLjUsMC0xLjEsMC0xLjdjMS4xLDAsMiwwLDMuMiwwIGMwLDAuNiwwLDEuMiwwLDEuN2MwLDcsMCwxNCwwLDIwLjljMCwwLjQsMCwwLjgsMCwxLjJjMC4xLDEuOCwxLjQsMy4xLDMuMSwzLjFjMS44LDAsMy4xLTEuMiwzLjItMy4xYzAtMC41LDAtMSwwLTEuNSBjMC0xNCwwLTI3LjksMC00MS45YzAtMC42LDAtMS4zLDAuMy0xLjdjMS41LTEuOCwzLTMuNSw0LjYtNS4zYzQuOSwyLjEsOC44LTEuNSw5LTZjMC4yLTQsMC43LTgsMS4zLTEyYzAuNS0zLjUsMS4zLTYuOSwyLTEwLjMgYzAuMiwwLDAuMywwLDAuNSwwLjFjMCwwLjYsMCwxLjEsMCwxLjdjMCwyNC4yLDAsNDguMywwLDcyLjVjMCwwLjksMCwxLjgsMC4yLDIuN2MwLjUsMi41LDIuNyw0LjUsNS4zLDQuOGM0LDAuNCw2LjgtMi40LDYuOC02LjcgYzAtMTUuNCwwLTMwLjksMC00Ni4zYzAtMC42LDAtMS4zLDAtMS45YzIuMiwwLDQuMSwwLDYuMiwwYzAsNC4yLDAsOC4zLDAsMTIuNGMwLDEyLjIsMCwyNC4zLDAsMzYuNWMwLDMuMywyLjQsNS45LDUuNiw2LjEgYzMuMywwLjIsNi0xLjksNi42LTUuMmMwLjEtMC43LDAuMS0xLjQsMC4xLTIuMWMwLTI0LjQsMC00OC43LDAtNzMuMWMwLTAuNiwwLTEuMSwwLTEuN2MwLjQsMC41LDAuNSwwLjksMC42LDEuNCBjMS43LDcuMiwyLjcsMTQuNSwzLjIsMjEuOGMwLjIsMy42LDMuMSw2LjMsNi40LDYuMUMxNTMsMTA1LjIsMTU1LjUsMTAyLjIsMTU1LjEsOTguNXoiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTM5LjMsNDAuOGM2LjcsMC4xLDEyLjMtNS4zLDEyLjQtMTIuMWMwLjEtNi42LTUuMy0xMi4yLTEyLTEyLjRjLTYuNy0wLjEtMTIuMyw1LjItMTIuNSwxMS44IEMyNy4xLDM1LjIsMzIuNCw0MC43LDM5LjMsNDAuOHoiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTEyMy44LDQwLjhjNi43LDAsMTIuMS01LjQsMTIuMi0xMi4yYzAtNi43LTUuNC0xMi4zLTEyLjItMTIuM2MtNi44LDAtMTIuMiw1LjQtMTIuMiwxMi4yIEMxMTEuNSwzNS40LDExNyw0MC45LDEyMy44LDQwLjh6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik04Mi43LDEwMi42YzMuNSwwLDYuNC0yLjgsNi40LTYuM2MwLTMuNS0yLjgtNi40LTYuMy02LjRjLTMuNSwwLTYuNCwyLjgtNi40LDYuMyBDNzYuNCw5OS43LDc5LjIsMTAyLjYsODIuNywxMDIuNnoiLz4gPC9nPiA8L3N2Zz4=", "sessions": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDE2MS44IDE2OC42IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAxNjEuOCAxNjguNjsiIHhtbDpzcGFjZT0icHJlc2VydmUiPiA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPiAuc3Qwe2ZpbGw6IzAwQUEzMjt9IDwvc3R5bGU+IDxnPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMjYuNywxMjkuNkMxNS45LDExNy43LDIzLjksOTkuMyw0MCw5OC43VjYyLjJjMC44LDAsMS4zLDAsMS45LDBjMTEuNCwwLDIyLjcsMCwzNC4xLDBjNS4zLDAsOS40LTQsOS40LTkgYzAtNS4xLTQtOS05LjQtOS4xYy0wLjgsMC0xLjUsMC0yLjMsMGMtMTcuMiwwLTM0LjMsMC01MS41LDBjLTYuNSwwLTExLjcsMi42LTE1LjUsNy45Yy0wLjcsMS0xLjIsMi0xLjcsMy4xIGMtMSwyLjUtMS41LDUuMi0xLjUsNy45djk2LjFjMC4yLDEuNywxLjcsMy40LDMuNiwzLjZoNS40YzAtMi45LDAtNS44LDAtOC42YzAtOC44LDMuMy0xNi4yLDEwLjItMjEuOCBDMjQuMSwxMzEuMywyNS40LDEzMC41LDI2LjcsMTI5LjZ6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik01Ny44LDE1MC4zYy0xLTguNi05LTE1LjItMTcuOC0xNS4yYy04LjgsMC0xNi44LDYuNi0xNy44LDE1LjJjLTAuNSw0LjEtMC4zLDguMi0wLjMsMTIuNCBjMTIuMSwwLDI0LjIsMCwzNi4zLDBDNTgsMTU4LjYsNTguMiwxNTQuNCw1Ny44LDE1MC4zeiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTAzLjIsMTUwLjNjLTEtOC42LTktMTUuMi0xNy44LTE1LjJjLTguOCwwLTE2LjgsNi42LTE3LjgsMTUuMmMtMC41LDQuMS0wLjMsOC4yLTAuMywxMi40IGMxMi4xLDAsMjQuMiwwLDM2LjMsMEMxMDMuNCwxNTguNiwxMDMuNywxNTQuNCwxMDMuMiwxNTAuM3oiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTEzMC44LDEzNS4yYy04LjgsMC0xNi44LDYuNi0xNy44LDE1LjJjLTAuNSw0LjEtMC4zLDguMi0wLjMsMTIuNGMxMSwwLDIyLDAsMzMsMGMxLjYtMC4zLDMuMy0yLjMsMy4zLTQuNSBjMC0yLjYsMC4xLTUuMy0wLjMtNy44QzE0Ny41LDE0MS44LDEzOS42LDEzNS4yLDEzMC44LDEzNS4yeiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTUzLjMsNy43Yy0zMCwwLTU5LjksMC04OS45LDBjLTMuNiwwLTUuMywxLjctNS4zLDUuM2MwLDYuOSwwLDEzLjcsMCwyMC42YzAsMC40LDAuMSwwLjksMC4xLDEuNCBjNS45LDAsMTEuNywwLDE3LjUsMGM1LjgsMCwxMC42LDIuMSwxNC40LDYuNWMxLjIsMS40LDIuMSwzLjEsMy4yLDQuOGMwLjUtMC4yLDAuOS0wLjQsMS40LTAuN2MxMi41LTYuMiwyNS4xLTEyLjQsMzcuNi0xOC43IGMwLjYtMC4zLDEuMi0wLjYsMS44LTAuOGMyLjMtMC44LDQuOCwwLjQsNS43LDIuN2MwLjksMi40LTAuMiw0LjYtMi45LDZjLTEzLjIsNi42LTI2LjQsMTMuMi0zOS43LDE5LjdjLTIuMSwxLTMuMiwyLTMuOSw0LjUgYy0wLjEsMC4zLTAuMiwwLjYtMC4zLDAuOGMtMy40LDcuNi05LjIsMTEuMy0xNy41LDExLjRjLTUuNywwLjEtMTEuNSwwLTE3LjUsMGMwLDQuNCwwLDguNiwwLDEyLjljMCwzLjUsMS44LDUuMyw1LjMsNS4zIGMzMCwwLDU5LjksMCw4OS45LDBjMy41LDAsNS4zLTEuOCw1LjMtNS4zYzAtMjMuNywwLTQ3LjQsMC03MS4xQzE1OC42LDkuNSwxNTYuOSw3LjcsMTUzLjMsNy43eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMjYuMywzNC45YzcuNSwwLDEzLjctNi4zLDEzLjYtMTMuN2MtMC4xLTcuNS02LjMtMTMuNi0xMy43LTEzLjVDMTguOCw3LjgsMTIuNywxNCwxMi43LDIxLjQgQzEyLjcsMjguOCwxOC45LDM0LjksMjYuMywzNC45eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMzAuOSwxMTdjMCw0LjksNC4yLDkuMSw5LjEsOS4xYzQuOSwwLDkuMS00LjIsOS4xLTkuMWMwLTQuOS00LjItOS4xLTkuMS05LjFDMzUsMTA3LjksMzAuOSwxMTIuMSwzMC45LDExN3oiIC8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik05NC40LDExNy4xYzAuMS00LjktNC05LjEtOS05LjJjLTQuOS0wLjEtOS4xLDQtOS4yLDljLTAuMSw0LjksNCw5LjEsOSw5LjJDOTAuMiwxMjYuMSw5NC40LDEyMiw5NC40LDExNy4xeiIgLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTEzOS44LDExNi45YzAtNS00LjItOS05LjEtOWMtNSwwLTkuMSw0LjItOSw5LjFjMCw1LDQuMiw5LDkuMSw5QzEzNS44LDEyNiwxMzkuOSwxMjEuOSwxMzkuOCwxMTYuOXoiLz4gPC9nPiA8L3N2Zz4=", "first": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDE2MS44IDE2OC42IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAxNjEuOCAxNjguNjsiIHhtbDpzcGFjZT0icHJlc2VydmUiPiA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPiAuc3Qwe2ZpbGw6IzAwQUEzMjt9IDwvc3R5bGU+IDxnPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTAyLjksMTM0LjNjLTEtMTEuNi0xMy0yMS0yNS4yLTE5Yy0xMS43LDEuOS0xOS4zLDEwLjktMTkuMywyMi44YzAsOC40LDAsMTYuOCwwLDI1LjNjMTQuOSwwLDI5LjksMCw0NC44LDAgYzAtMy44LDAtNy42LDAtMTEuNEMxMDMuMiwxNDYuMSwxMDMuNSwxNDAuMSwxMDIuOSwxMzQuM3oiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTE1Ny40LDEyNy4xYzAtMS43LTAuMi0zLjMtMC42LTVjLTIuNS0xMC45LTEzLjctMTguOS0yNS43LTE2LjhjLTEwLjcsMS45LTE4LjYsMTEuMS0xOC42LDIxLjkgYzAsOC4yLDAsMTYuNCwwLDI0LjZjMCwxLjEsMC4zLDEuNCwxLjQsMS40YzYuMywwLDEyLjUsMCwxOC44LDBjMCwwLDAtMC4xLDAtMC4xYzcuOCwwLDE1LjYsMCwyMy40LDBjMS4xLDAsMS40LTAuMywxLjQtMS40IEMxNTcuNCwxNDMuNSwxNTcuNCwxMzUuMywxNTcuNCwxMjcuMXoiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTQ4LjcsMTIyLjdjLTIuNS0xMS43LTE0LjEtMTkuNi0yNi4yLTE3LjNjLTkuOSwxLjktMTcuOSwxMC45LTE4LjEsMjFjLTAuMSw4LjQsMCwxNi44LTAuMSwyNS4yIGMwLDEuMiwwLjQsMS41LDEuNiwxLjVjNi45LDAsMTMuOSwwLDIwLjgsMGM3LDAsMTQsMCwyMSwwYzEuNiwwLDEuNiwwLDEuNi0xLjZjMC03LjcsMC0xNS41LDAtMjMuMiBDNDkuMiwxMjYuNCw0OSwxMjQuNSw0OC43LDEyMi43eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTIwLjIsOTkuNWMwLTAuMiwwLTAuMiwwLTAuM2MtMC4yLTAuMy0wLjUtMC41LTAuNy0wLjhjLTMuMy0zLjYtNS40LTcuOC01LjgtMTIuNyBjLTEtMTAuNSw1LjItMTkuOCwxNS4yLTIyLjljMS0wLjMsMS4yLTAuNywxLTEuN2MtMi40LTkuNy0xMC41LTE2LjMtMjAuNi0xN2MtOS4xLTAuNy0xNy45LDQuOC0yMS43LDEzLjFjLTEuOCwzLjktMi4xLDgtMiwxMi4yIGMwLDMsMCwzLDIuNyw0YzAsMCwwLjEsMCwwLjEsMGMxMy45LDQuOSwxOC44LDIyLjgsOS4xLDM0Yy0wLjUsMC42LTEsMS4yLTEuNiwxLjljMy4xLDIuNSw2LjIsNSw5LjQsNy42IEMxMDguMSwxMDkuMSwxMTMuMiwxMDMuNCwxMjAuMiw5OS41eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNNjUuNSwxMDguOGMtNi41LTcuMS04LTE2LjItNC4xLTI0LjVjMi44LTUuOSw3LjQtOS43LDEzLjctMTEuNmMwLjQtMC4xLDEtMC42LDEtMC45YzAtMi44LDAuMi01LjUtMC4xLTguMyBjLTEuOC0xMy4yLTEzLjgtMjAuNy0yNC45LTE5LjNjLTksMS4xLTE2LjksNy44LTE5LDE2LjVjLTAuNCwxLjctMC40LDEuNywxLjIsMi4yYzAuMywwLjEsMC43LDAuMiwxLDAuNCBjOS41LDMuOCwxMy43LDExLjYsMTMuOSwyMC40YzAuMSw1LjMtMiw5LjktNS40LDEzLjhjLTAuNSwwLjYtMSwxLjEtMS42LDEuOGM3LjMsNCwxMi4zLDkuOCwxNS4yLDE3LjRjMy4yLTIuNSw2LjMtNSw5LjQtNy42IEM2NS45LDEwOS4xLDY1LjcsMTA4LjksNjUuNSwxMDguOHoiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTY4LjYsOTMuOGMwLDYuOCw1LjYsMTIuMywxMi40LDEyLjJjNi44LDAsMTIuMy01LjYsMTIuMy0xMi40YzAtNi44LTUuNi0xMi40LTEyLjUtMTIuMyBDNzQsODEuMiw2OC41LDg2LjgsNjguNiw5My44eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNNTMuNiwzNC45YzcuMS0wLjEsMTIuNC01LjMsMTIuNS0xMi4zYzAuMS02LjYtNS43LTEyLjYtMTIuMy0xMi4zQzQ3LjEsOS45LDQxLjQsMTYsNDEuNCwyMi41IEM0MS40LDI4LjgsNDYuOSwzNSw1My42LDM0Ljl6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik0xMjIuNSw4My40YzAsNi45LDUuNiwxMi42LDEyLjQsMTIuNmM2LjcsMCwxMi4zLTUuNywxMi4zLTEyLjRjMC02LjgtNS41LTEyLjMtMTIuMy0xMi40IEMxMjguMiw3MS4xLDEyMi42LDc2LjYsMTIyLjUsODMuNHoiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTEwNy43LDM0LjhjNy4xLDAsMTIuNS01LjMsMTIuNi0xMi4zYzAuMS02LjgtNS43LTEyLjUtMTIuNC0xMi40Yy02LTAuMy0xMi40LDUtMTIuMywxMi40IEM5NS42LDI5LjQsMTAxLDM0LjgsMTA3LjcsMzQuOHoiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTI2LjcsOTUuOWM2LjcsMCwxMi4zLTUuNiwxMi40LTEyLjNjMC02LjktNS40LTEyLjQtMTIuMi0xMi40Yy02LjksMC0xMi40LDUuNC0xMi41LDEyLjIgQzE0LjQsOTAuMiwxOS45LDk1LjksMjYuNyw5NS45eiIvPiA8L2c+IDwvc3ZnPg==", "pwd": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDE2MS44IDE2OC42IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAxNjEuOCAxNjguNjsiIHhtbDpzcGFjZT0icHJlc2VydmUiPiA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPiAuc3Qwe2ZpbGw6IzBCQUQzQTt9IDwvc3R5bGU+IDxnPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTUxLDEyNS4yYy0xLTIuMi0yLjEtNC40LTMuMi02LjZjLTEuOS0zLjktNC00LjYtNy44LTIuNmMtMi45LDEuNS01LjcsMy04LjcsNC41Yy0wLjQtMC44LTAuNy0xLjUtMS0yLjIgYy00LjktMTAuNC05LjgtMjAuNy0xNC42LTMxLjFjLTEuOS00LTQuOS01LjktOS4zLTUuOWMtMTEuMywwLjEtMjIuNiwwLTMzLjksMGMtMC42LDAtMS4zLDAtMiwwYy0wLjQtMy0wLjgtNS44LTEuMi04LjkgYzAuOSwwLDEuNiwwLDIuMiwwYzEwLjMsMCwyMC42LDAsMzAuOSwwYzMuNSwwLDUuMS0xLjYsNS4xLTUuMWMwLTIuNCwwLTQuOCwwLTcuMWMwLTQtMS42LTUuNi01LjYtNS42Yy05LjYsMC0xOS4yLDAtMjguOSwwIGMtMS43LDAtMy40LDAuMS01LDBjLTAuNCwwLTEuMS0wLjUtMS4yLTAuOGMtMC40LTIuNy0wLjgtNS40LTEuMS04LjFjMC45LTAuMiwxLjgtMC40LDIuNi0wLjdjOC4zLTIuNSwxMy4yLTEwLjMsMTIuNC0xOS4yIGMtMC44LTguMi03LjctMTQuOC0xNi40LTE1LjZjLTEwLjgtMS0yMC41LDkuMi0xOC45LDE5LjhjMS4yLDcuOCwyLjIsMTUuNywzLjMsMjMuNkM1MC4yLDY2LDUyLDc4LjQsNTMuOCw5MC44IGMwLjksNS45LDQsOC41LDkuOSw4LjVjMTIuMSwwLDI0LjEsMCwzNi4yLDBjMSwwLDEuNywwLjEsMi4yLDEuMmM1LjYsMTEuOCwxMS4yLDIzLjYsMTYuOCwzNS40YzIuNCw1LDcuNCw3LDEyLjQsNC42IGM1LjktMi45LDExLjctNS44LDE3LjUtOC44QzE1MS41LDEzMC4zLDE1Mi4zLDEyOCwxNTEsMTI1LjJ6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik05OCwxMTIuN2MtMS4zLTMuOC0zLjUtNS4zLTcuNC00LjZjLTEuMSwwLjItMS42LDAuMy0xLjksMS42Yy0zLjUsMTcuMi0yMC4xLDI4LjMtMzYuOSwyNC40IGMtMTMtMy0yMS4zLTExLjItMjQuMS0yNC4zQzI1LDk3LjMsMzAuNiw4NC42LDQxLjMsNzcuNmMwLjktMC42LDEuNC0xLjEsMS4yLTIuM2MtMC45LTUuNi0xLjctMTEuMi0yLjUtMTcgYy0wLjUsMC4yLTAuOCwwLjMtMS4xLDAuNGMtMjAuOCw4LjUtMzMuNCwzMi0yOC45LDU0YzQuNiwyMi45LDIzLjEsMzguOCw0Ni41LDM5LjljMTkuMSwwLjksMzguMS0xMC43LDQ1LjktMjguMSBjMC4zLTAuNiwwLjMtMS42LDAtMi4yQzEwMC45LDExOSw5OS4xLDExNiw5OCwxMTIuN3oiLz4gPC9nPiA8L3N2Zz4=", "communities": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDE2MS44IDE2OC42IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAxNjEuOCAxNjguNjsiIHhtbDpzcGFjZT0icHJlc2VydmUiPiA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPiAuc3Qwe2ZpbGw6IzAwQUEzMjt9IDwvc3R5bGU+IDxnPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTEwLjIsNzIuMWMwLTYuNSwwLTEzLDAtMTkuNWMwLTAuNC0wLjMtMC45LTAuNi0xLjJjLTkuMi02LjUtMTguNC0xMi45LTI3LjctMTkuNGMtMC4yLDAuMS0wLjMsMC4xLTAuNCwwLjIgYy05LjEsNi40LTE4LjIsMTIuNy0yNy4yLDE5LjFjLTAuNCwwLjMtMC43LDEuMS0wLjcsMS42YzAsNSwwLDEzLjQsMCwxOWMwLDMuMywyLjcsNiw2LDZsNDQuOCwwQzEwNy42LDc4LjEsMTEwLjIsNzUuNCwxMTAuMiw3Mi4xIHoiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTE1OC42LDExNy4zYy0wLjMtMS0wLjctMi0xLjEtM2MtMi4zLTYuMy00LjUtMTIuNi02LjgtMTguOWMtMi4yLTYtNi41LTkuNy0xMy0xMC4xIGMtNC4yLTAuMy04LjUtMC4xLTEyLjcsMC4yYy0xLjksMC4yLTQsMS4xLTUuNywyLjFjLTMuNCwyLjEtNS42LDUuMy03LDguOWMtMi41LDYuNy00LjksMTMuNS03LjMsMjAuMmMtMS4xLDMuMiwxLDYuMSw0LjIsNS42IGMxLjgtMC4zLDIuNy0xLjUsMy40LTNjMi41LTUuNyw0LjktMTEuNSw3LjQtMTcuMmMwLjItMC40LDAuNC0wLjksMC42LTEuM2MwLjEsMCwwLjMsMC4xLDAuNCwwLjFjLTAuMiwzLjktMC4xLDcuOC0wLjYsMTEuNiBjLTAuNSwzLjYtMS43LDcuMS0yLjUsMTAuNmMtMC43LDIuOS0xLjQsNS44LTIuMiw5YzEuOCwwLDMuNCwwLDUuMSwwYzAsMC44LDAsMS4zLDAsMS45YzAsNi43LDAsMTMuNCwwLDIwLjEgYzAsMS43LDAuNywzLjEsMi4xLDMuMmMyLjMsMC4yLDQuNiwwLDcsMGMwLTguNSwwLTE2LjgsMC0yNS4yYzEuNSwwLDIuOCwwLDQuMywwYzAsOC41LDAsMTYuOCwwLDI1LjNjMS43LDAsMy4yLDAsNC42LDAgYzIuOSwwLDMuNy0wLjksMy43LTMuOGMwLTYuNiwwLTEzLjEsMC0xOS43YzAtMC42LDAtMS4yLDAtMS45YzIsMCwzLjgsMCw1LjcsMGMtMS4xLTQuMi0yLjEtOC4zLTMuMy0xMi4zIGMtMS44LTYuMS0zLjItMTIuMy0yLjItMTljMC4zLDAuNywwLjYsMS4yLDAuOCwxLjhjMi4zLDUuNSw0LjcsMTAuOSw3LDE2LjRjMC4zLDAuNiwwLjUsMS4yLDAuOSwxLjhjMS4yLDEuNiwzLjIsMi4yLDQuOSwxLjQgQzE1OC4zLDEyMS4yLDE1OS4yLDExOS4yLDE1OC42LDExNy4zeiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNNTguNiwxMTYuN2MtMi44LTcuOS01LjctMTUuNy04LjQtMjMuNmMtMS4yLTMuNy0zLjUtNS42LTcuMi02LjVjLTcuMi0xLjctMTQuMy0xLjgtMjEuNS0wLjIgYy00LjMsMC45LTcsMy4yLTguMyw3LjVjLTIuNCw3LjctNS40LDE1LjMtOC4xLDIyLjljLTAuOCwyLjQsMCw0LjUsMi4xLDUuNGMyLDAuOCw0LjEtMC4xLDUuMi0yLjNjMC4yLTAuNCwwLjQtMC44LDAuNi0xLjMgYzIuMy01LjQsNC42LTEwLjcsNi45LTE2LjFjMC4yLTAuNSwwLjUtMSwwLjctMS40YzAuMSwwLDAuMiwwLDAuMywwLjFjMCwwLjYsMCwxLjIsMCwxLjhjMCwxNi44LDAsMzMuNSwwLDUwLjNjMCwwLjcsMCwxLjMsMC4xLDIgYzAuMiwxLjIsMSwyLjEsMi4yLDIuMmMyLjIsMC4xLDQuNCwwLDYuNywwYzAtMC43LDAtMS4yLDAtMS44YzAtOC40LDAtMTYuOCwwLTI1LjJjMC0wLjUsMC0wLjksMC0xLjRjMC4xLTEuMiwwLjktMS45LDItMS45IGMxLjEtMC4xLDEuOSwwLjUsMi4xLDEuNmMwLjEsMC41LDAuMSwxLjEsMC4xLDEuN2MwLDguNCwwLDE2LjgsMCwyNS4yYzAsMC42LDAsMS4yLDAsMS45YzEuNiwwLDMsMCw0LjQsMGMzLjIsMCw0LTAuOCw0LTQgYzAtMTcsMC0zMy45LDAtNTAuOWMwLTAuNSwwLTEuMSwwLTEuNmMwLjEsMCwwLjIsMCwwLjMsMGMwLjMsMC43LDAuNiwxLjQsMC45LDIuMWMyLjMsNS41LDQuNywxMC45LDcsMTYuNGMwLjcsMS41LDEuNiwyLjcsMy40LDMgQzU3LjYsMTIyLjgsNTkuOCwxMTkuOSw1OC42LDExNi43eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNNDIuNSw1Mi4xYzIsMC4yLDMuNi0wLjYsNS4yLTEuN2MxMS40LTgsMjIuNy0xNS45LDM0LjItMjMuOWMwLjQsMC4zLDAuNywwLjUsMS4xLDAuNyBjNy43LDUuNCwxNS41LDEwLjgsMjMuMiwxNi4zYzMuNSwyLjUsNy4xLDUsMTAuNiw3LjRjNC4zLDIuOSw5LjgsMC40LDEwLjMtNC43YzAuMi0yLjctMC45LTQuNy0zLjEtNi4yIGMtMTMuNy05LjYtMjUuMS0xNy42LTM4LjgtMjcuM2MtMy4yLTIuNC01LjctMC40LTYuNSwwLjFjLTkuNSw2LjctMTYuOCwxMS43LTI2LjIsMTguM2MtNC4zLDMtOC43LDYuMS0xMyw5LjEgYy0yLjMsMS43LTMuMyw0LjMtMi42LDdDMzcuNCw0OS44LDM5LjcsNTEuNyw0Mi41LDUyLjF6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik05Ni44LDExMC43Yy0xLjMtMi42LTMuNC0zLjktNi4zLTMuOWMtNS42LDAtMTEuMywwLTE2LjksMGMtMi45LDAtNSwxLjMtNi4zLDMuOWMtMS4xLDIuMy0yLjMsNC42LTMuNSw2LjkgYy0yLjIsNC4zLTQuNCw4LjYtNi41LDEyLjljLTEuMiwyLjUsMCw1LDIuNiw1LjRjMS42LDAuMiwzLTAuNiwzLjktMi40YzIuNy01LjQsNS40LTEwLjgsOC4yLTE2LjJjMC4yLTAuNCwwLjUtMC44LDAuNy0xLjMgYzAuMSwwLDAuMiwwLjEsMC4yLDAuMWMwLDAuNSwwLDEuMSwwLDEuNmMwLDEzLDAsMjYsMCwzOS4xYzAsMC41LDAsMSwwLDEuNWMwLjIsMS4zLDAuOSwyLjMsMi4yLDIuNWMxLjUsMC4yLDMsMCw0LjYsMCBjMC0wLjYsMC0xLjEsMC0xLjVjMC4xLTcuMSwwLjEtMTQuMywwLjItMjEuNGMwLTAuNS0wLjItMS4yLDAuMS0xLjVjMC41LTAuNywxLjEtMS41LDEuOS0xLjdjMS0wLjMsMS45LDAuNCwyLjIsMS41IGMwLjEsMC42LDAuMSwxLjIsMC4xLDEuOGMwLDctMC4xLDE0LTAuMSwyMS4xYzAsMC41LDAsMS4xLDAsMS44YzEuMiwwLDIuMiwwLDMuMiwwYzMuMSwwLDMuOS0wLjgsMy45LTMuOWMwLTEzLjEsMC0yNi4xLDAtMzkuMiBjMC0wLjYsMC0xLjEsMC0xLjdjMC4xLDAsMC4yLDAsMC4zLTAuMWMwLjMsMC41LDAuNSwxLDAuOCwxLjVjMi43LDUuMyw1LjQsMTAuNyw4LjEsMTZjMS4xLDIuMSwzLjEsMi45LDUsMS45YzEuOC0wLjksMi40LTMsMS40LTUgQzEwMy40LDEyMy45LDEwMCwxMTcuMyw5Ni44LDExMC43eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMzcuNSw4MC4xYzItMi40LDIuOC01LjIsMi44LTguNWMwLTAuNCwwLTEtMC4xLTEuNmMtMC40LTQtMy02LjQtNy4yLTdjLTQtMC41LTcuNywxLjMtOC45LDQuNyBjLTEuNiw0LjYtMC44LDksMi40LDEyLjZDMjkuNyw4NCwzNC41LDgzLjgsMzcuNSw4MC4xeiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTIzLjMsNzEuOWMwLDIuOSwwLjcsNS42LDIuNSw3LjljMy4yLDQuMiw4LjYsNC4zLDExLjgsMC4xYzIuNi0zLjQsMy4zLTcuMywyLjEtMTEuNWMtMC43LTIuNi0yLjYtNC4zLTUuMi01IEMxMjkuNiw2MiwxMjMuMiw2My45LDEyMy4zLDcxLjl6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik03NS4xLDk1LjhjMCw0LjEsMy4xLDcuNSw3LDcuNWMzLjksMCw3LTMuNCw3LTcuNWMwLTQuMS0zLjItNy41LTctNy40Qzc4LjIsODguNSw3NS4xLDkxLjgsNzUuMSw5NS44eiIvPiA8L2c+IDwvc3ZnPg==", "eo": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDE2MS44IDE2OC42IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAxNjEuOCAxNjguNjsiIHhtbDpzcGFjZT0icHJlc2VydmUiPiA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPiAuc3Qwe2ZpbGw6IzAwQUEzMjt9IDwvc3R5bGU+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik00LjUsNy41YzAsNTEuMiwwLDEwMi41LDAsMTUzLjdjNTEuMiwwLDEwMi41LDAsMTUzLjcsMGMwLTUxLjIsMC0xMDIuNSwwLTE1My43QzEwNyw3LjUsNTUuOCw3LjUsNC41LDcuNXogTTkwLjEsMTI0Yy00LDYuMS02LjgsMTMuMS0xMy4xLDE3LjVjLTYuMSw0LjItMTIuNSw3LTIwLjUsNS42Yy0wLjcsMS0xLjYsMi4zLTIuNywzLjhjLTQuMS0yLjUtOC4xLTUtMTIuMy03LjUgYzAuOC0xLjQsMS41LTIuNywyLjItNGMtNi4yLTkuNy02LjItMTkuNi0xLjEtMjkuOGMxOC41LDAsMzcsMCw1Ni4zLDBDOTUuNywxMTQuOCw5MywxMTkuNSw5MC4xLDEyNHogTTE0OC45LDEwOS41IGMtMTYuNCwwLTMyLjgsMC00OS40LDBjMy41LTguNywxMS4yLTE1LjMsMTMuMS0yNC43YzEuOC05LjMsMy4yLTE4LjYsNC44LTI4LjRjMy43LDIuMyw3LjEsNC4zLDExLDYuN2MzLjktNi4yLDcuOC0xMi41LDEyLTE5LjEgYy0xNC4yLTguNy0yOC4xLTE3LjQtNDIuNC0yNi4yYy00LDYuNC03LjgsMTIuNi0xMS45LDE5LjFjMy42LDIuMyw3LjEsNC41LDEwLjksNi45Yy04LjIsNi4yLTE2LjMsMTEuOS0yNCwxOC4yIGMtMywyLjQtNS4xLDYtNy4yLDkuNGMtNy45LDEyLjYtMTUuNiwyNS40LTIzLjQsMzguMWMtOS41LDAtMTkuMSwwLTI4LjgsMGMwLTMwLjgsMC02MS42LDAtOTIuNmM0NC45LDAsODkuOSwwLDEzNS4xLDAgQzE0OC45LDQ3LjYsMTQ4LjksNzguNSwxNDguOSwxMDkuNXoiLz4gPC9zdmc+", "materials": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDE2MS44IDE2OC42IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAxNjEuOCAxNjguNjsiIHhtbDpzcGFjZT0icHJlc2VydmUiPiA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPiAuc3Qwe2ZpbGw6IzAwQUEzMjt9IDwvc3R5bGU+IDxnPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTU4LjUsOC4xYy01MS45LDAtMTAzLjgsMC0xNTUuNywwYzAsNTEuOSwwLDEwMy44LDAsMTU1LjdjNTEuOSwwLDEwMy44LDAsMTU1LjcsMCBDMTU4LjUsMTExLjksMTU4LjUsNjAsMTU4LjUsOC4xeiBNMTQ5LjIsMTU0LjZjLTQ1LjcsMC05MS40LDAtMTM3LjMsMGMwLTQ1LjksMC05MS41LDAtMTM3LjNjNDUuOCwwLDkxLjQsMCwxMzcuMywwIEMxNDkuMiw2Mi45LDE0OS4yLDEwOC42LDE0OS4yLDE1NC42eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTE3LjcsOTIuN2MtNS4yLDMuMy03LjUsNy42LTYuOSwxNGMwLjYsNy4zLDAuMSwxNC43LDAuMSwyMi4xYy0yMC41LDAtNDAuNSwwLTYwLjYsMGMwLTI3LjcsMC01NS4yLDAtODMgYzYuNiwxLjEsMTMuMi0xLjUsMTkuMywxLjhjOC40LTAuOSwxNi43LDEuMywyNS4yLTEuM2M0LjktMS41LDEwLjYtMC4zLDE2LjEtMC4zYzAsMTAuMSwwLDE5LjgsMCwzMC4xYzQuMS0zLjYsNy43LTYuMyw3LjEtMTIuMyBjLTAuNy04LTAuMi0xNi0wLjItMjQuNGMtNy4yLDAtMTQtMC4xLTIwLjgsMC4xYy0yLjMsMC00LTAuMS00LTNjLTMuMiwwLTYsMC05LjIsMGMxLjQtMi41LDEuNi01LTAuNy02LjRjLTEuMy0wLjgtMy42LTAuOC01LTAuMSBjLTIuNiwxLjMtMi4yLDMuOS0xLDYuNWMtMy4zLDAtNi4zLDAtOS4yLDBjLTAuMywxLjEtMC42LDItMC45LDIuOWMtOCwwLTE1LjgsMC0yMy43LDBjMCwzMi4xLDAsNjMuOSwwLDk1LjdjMjQuOSwwLDQ5LjYsMCw3NC4yLDAgQzExNy43LDEyMC45LDExNy43LDEwNi44LDExNy43LDkyLjd6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik05Ny4yLDEwNy43YzE0LjItMTQuMiwyOC4yLTI4LjIsNDEuOS00MS45Yy0yLTIuMS00LjMtNC40LTYuNC02LjVjLTEzLjksMTMuOS0yNy45LDI3LjktNDEuOSw0MS45IEM5MywxMDMuNCw5NS4zLDEwNS43LDk3LjIsMTA3Ljd6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik01Ni4zLDYzLjJjMTYuMiwwLDMyLjEsMCw0OCwwYzAtMS45LDAtMy42LDAtNS40Yy0xNiwwLTMxLjksMC00OCwwQzU2LjMsNTkuNiw1Ni4zLDYxLjMsNTYuMyw2My4yeiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNNTYuNCw3OS4zYzE2LjEsMCwzMS45LDAsNDcuOSwwYzAtMS44LDAtMy41LDAtNS40Yy0xNi4yLDAtMzIuMSwwLTQ3LjksMEM1Ni40LDc1LjksNTYuNCw3Ny42LDU2LjQsNzkuM3oiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTk3LjUsODkuNGMtMTMuOSwwLTI3LjUsMC00MS4xLDBjMCwyLDAsMy44LDAsNS43YzEwLjEsMCwxOS45LTAuMywyOS44LDAuMUM5MS4zLDk1LjUsOTQuOCw5My44LDk3LjUsODkuNHoiIC8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik04NS42LDEwNS41Yy05LjksMC0xOS42LDAtMjkuMiwwYzAsMS45LDAsMy42LDAsNS40YzkuNCwwLDE4LjYsMCwyNy45LDBDODQuNywxMDguOSw4NS4xLDEwNy4yLDg1LjYsMTA1LjV6IiAvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNODguNiwxMDUuM2MtMC42LDIuMy0xLDQuMy0xLjYsNi41YzIuMy0wLjcsNC4xLTEuMiw1LjYtMS43QzkxLjMsMTA4LjUsOTAsMTA3LDg4LjYsMTA1LjN6Ii8+IDwvZz4gPC9zdmc+", "trained": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDE2MS44IDE2OC42IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAxNjEuOCAxNjguNjsiIHhtbDpzcGFjZT0icHJlc2VydmUiPiA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPiAuc3Qwe2ZpbGw6IzAwQUEzMjt9IDwvc3R5bGU+IDxnPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTU0LjksMTI3LjFjLTEuNS04LjgtMTAtMTQuOS0xOC44LTEzLjRjLTgsMS4zLTEzLjcsOC0xMy44LDE2LjFjLTAuMSw2LDAsMTIsMCwxOGMwLDAuMywwLjEsMC42LDAuMSwwLjkgYzAuNSwwLDAuOSwwLDEuNCwwYzYuNSwwLDEzLjEsMCwxOS42LDBjMy45LDAsNy45LDAsMTEuOCwwYzAtNi44LDAtMTMuNywwLTIwLjVDMTU1LjEsMTI3LjgsMTU1LDEyNy41LDE1NC45LDEyNy4xeiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTAxLjQsMTIxYy04LjUtMC45LTE2LjEsNC4zLTE4LjEsMTIuNGMtMC4yLDAuNy0wLjQsMS41LTAuNCwyLjJjMCw2LjgsMCwxMy43LDAsMjAuNWMxMC45LDAsMjEuOCwwLDMyLjcsMCBjMC02LjUsMC4xLTEyLjksMC0xOS40QzExNS41LDEyOC43LDEwOS4yLDEyMS45LDEwMS40LDEyMXoiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTEyOC4yLDEwOS41Yy05LjItOC43LTUuMi0yMy43LDctMjYuOWMwLTAuMy0wLjEtMC42LTAuMS0wLjljLTEuNy03LTcuNy0xMi0xNS0xMi42IGMtNi44LTAuNS0xMy41LDMuNy0xNi4yLDEwLjFjLTEuNSwzLjQtMS4zLDctMS4yLDEwLjdjNiwxLjYsMTAuMSw1LjIsMTEuNywxMS4zYzEuNiw2LTAuMSwxMS4yLTQuMywxNS41YzIuNCwxLjksNC43LDMuNyw3LDUuNiBDMTE5LDExNi43LDEyMi44LDExMi40LDEyOC4yLDEwOS41eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTI5LjYsOTcuOWMwLDQuOSw0LjEsOSw5LDkuMWM1LDAsOS4xLTQuMSw5LjEtOS4xYzAtNS00LTkuMS05LjEtOS4xQzEzMy43LDg4LjgsMTI5LjYsOTIuOSwxMjkuNiw5Ny45eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNOTAuMiwxMDUuMmMwLDUsNCw5LjEsOS4xLDkuMWM1LDAsOS4xLTQuMSw5LjEtOS4xYzAtNC45LTQuMS05LTktOS4xQzk0LjQsOTYuMSw5MC4zLDEwMC4yLDkwLjIsMTA1LjJ6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik0xMTkuMSw2Mi41YzUsMCw5LTQuMSw5LTkuMWMwLTUtNC4xLTkuMS05LjEtOS4xYy01LDAtOS4xLDQuMS05LDkuMUMxMTAsNTguNSwxMTQsNjIuNSwxMTkuMSw2Mi41eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNODQuMSwxMDYuMWMwLTMwLjYsMC02MS4yLDAtOTEuOUgzMS43djkxLjljLTIuNCwwLTQuNiwwLTcsMGMwLTAuNSwwLTEsMC0xLjRjMC01LjEtMC4xLTc2LjMtMC4xLTgxLjFsLTQuMiwwIGMtNi4zLDAtMTEuMyw1LjEtMTEuMywxMS4zYzAsMjkuOSwwLDc2LjUsMCw3OC42aDc1Qzg0LjEsMTEzLjMsODQuMSwxMTMuMiw4NC4xLDEwNi4xeiBNNjIuMiwyMy43aDcuNXY3aC03LjVWMjMuN3ogTTYyLjIsMzguMSBoNy41djcuMWgtNy41VjM4LjF6IE00Ni4xLDIzLjdoNy41djdoLTcuNVYyMy43eiBNNDYuMSwzOC4xaDcuNXY3aC03LjVWMzguMXogTTQ2LjEsNjYuOWg3LjV2N2gtNy41VjY2Ljl6IE01My42LDg4LjNoLTcuNXYtN2g3LjUgVjg4LjN6IE01My42LDU5LjVoLTcuNXYtN2g3LjVWNTkuNXogTTYxLjQsMTA2LjFoLTcuMVY5NS40aDcuMVYxMDYuMXogTTYyLjIsNTIuNWg3LjV2N2gtNy41VjUyLjV6IE02Mi4yLDY2LjloNy41djdoLTcuNVY2Ni45eiBNNjkuNyw4OC4zaC03LjV2LTdoNy41Vjg4LjN6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik05OC41LDMzLjdMODkuOSwzNEw4OS44LDk0YzIuOS0zLjIsOC44LTQsOC44LTRWMzMuN3oiLz4gPC9nPiA8L3N2Zz4=", "media": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDE2MS44IDE2OC42IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAxNjEuOCAxNjguNjsiIHhtbDpzcGFjZT0icHJlc2VydmUiPiA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPiAuc3Qwe2ZpbGw6IzAwQUEzMjt9IDwvc3R5bGU+IDxnPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNNzkuOSw0MC43YzguMiwwLDE1LTYuOCwxNS0xNWMwLTguMy02LjYtMTUuMS0xNC44LTE1LjFjLTguNCwwLTE1LjEsNi41LTE1LjIsMTQuOCBDNjQuOSwzMy44LDcxLjYsNDAuNyw3OS45LDQwLjd6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik0zMC43LDEwNS44YzguMiwwLDE1LTYuOCwxNS0xNWMwLTguMy02LjYtMTUuMS0xNC44LTE1LjFjLTguNCwwLTE1LjEsNi41LTE1LjIsMTQuOCBDMTUuNyw5OC45LDIyLjQsMTA1LjgsMzAuNywxMDUuOHoiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTE1NC4zLDEzOS41YzAtMi4zLTAuMi00LjYtMC43LTYuOGMtMi44LTE0LjMtMTUuNi0yMy45LTI5LjEtMjFjLTEwLjQsMi4yLTE4LjgsMTItMjAsMjMuNGwtMTEuNC0xMS40IGMwLjgtMS42LDEuMy0zLjMsMS40LTUuMWMwLjQtNC43LTEuMS04LjctNC40LTEyYy0yLjItMi4yLTQuOS0zLjUtOC00LjFjMCwwLTAuMSwwLTAuMSwwVjkxYzUuOCwwLDE0LjUsMCwxOS4zLDAgYzEuOSwwLDMuNC0xLjUsMy41LTMuNGMwLjEtMywwLjItNy44LDAuMi0xMy4zYzAtMi4zLTAuMi00LjYtMC43LTYuOGMtMi44LTE0LjMtMTUuNi0yMy45LTI5LjEtMjFjLTExLjEsMi4zLTE5LjksMTMuMy0yMC4xLDI1LjYgYy0wLjEsNi4yLDAuMSwxMiwwLjIsMTUuNWMwLDEuOSwxLjYsMy40LDMuNSwzLjRjNi4xLDAsMTIuOCwwLDE4LjgsMHYxMS41Yy0wLjEsMC0wLjIsMC0wLjMsMGMtNC4yLDAuOC03LjQsMi45LTkuOCw2LjQgYy0xLjQsMi0yLjIsNC4zLTIuNCw2LjdjMCwwLjIsMCwwLjQtMC4xLDAuNmMwLDAuNiwwLDEuMiwwLDEuN2MwLjEsMC42LDAuMSwxLjEsMC4yLDEuN2MwLjEsMC44LDAuNCwxLjUsMC42LDIuM2wtMTAuOCwxMC44IGMtMi44LTE0LjItMTUuNi0yMy44LTI5LjEtMjFDMTUsMTE0LDYuMSwxMjUsNS45LDEzNy4zYy0wLjEsNi4yLDAuMSwxMiwwLjIsMTUuNWMwLDEuOSwxLjYsMy40LDMuNSwzLjRjNi45LDAsMTQuNiwwLDIxLjIsMCBjNS42LDAsMTYsMCwyMS40LDBjMS45LDAsMy40LTEuNSwzLjUtMy40YzAuMS0zLDAuMi03LjgsMC4yLTEzLjNjMC0wLjQsMC0wLjcsMC0xLjFsMTIuMy0xMi4zYzEsMS4zLDIuMiwyLjQsMy42LDMuNCBjMiwxLjQsNC4zLDIuMiw2LjcsMi40YzQuOCwwLjQsOC44LTEuMSwxMi4xLTQuNWwxMy45LDEzLjljMCw0LjYsMC4xLDguNywwLjIsMTEuNWMwLDEuOSwxLjYsMy40LDMuNSwzLjRjNi45LDAsMTQuNiwwLDIxLjIsMCBjNS42LDAsMTYsMCwyMS40LDBjMS45LDAsMy40LTEuNSwzLjUtMy40QzE1NC4yLDE0OS44LDE1NC40LDE0NSwxNTQuMywxMzkuNXogTTc4LjEsMTIzLjljLTIuMi0yLjItNC4zLTQuMy02LjUtNi41IGMwLjgtMC44LDEuNi0xLjYsMi40LTIuNGMxLjQsMS40LDIuNywyLjcsNC4xLDQuMWMyLjgtMi41LDUuNS01LDguMy03LjZjMC44LDAuOSwxLjYsMS43LDIuMywyLjYgQzg1LjMsMTE3LjQsODEuNywxMjAuNiw3OC4xLDEyMy45eiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTI5LjIsMTA1LjhjOC4yLDAsMTUtNi44LDE1LTE1YzAtOC4zLTYuNi0xNS4xLTE0LjgtMTUuMWMtOC40LDAtMTUuMSw2LjUtMTUuMiwxNC44IEMxMTQuMiw5OC45LDEyMC45LDEwNS44LDEyOS4yLDEwNS44eiIvPiA8L2c+IDwvc3ZnPg==", "girls": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDg4LjYgMTY4LjYiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDg4LjYgMTY4LjY7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4gPHN0eWxlIHR5cGU9InRleHQvY3NzIj4gLnN0MHtmaWxsOiMwMEFBMzI7fSA8L3N0eWxlPiA8Zz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTgxLjksOTUuM0M3Ny4zLDgyLjEsNzIuNyw2OC44LDY4LDU1LjdDNjUuNiw0OC43LDYwLjEsNDUsNTIuNyw0NWMtNS4zLDAtMTAuNywwLTE2LDAgYy03LjYsMC0xMi45LDMuOC0xNS41LDEwLjljLTEuMywzLjctMi42LDcuMy0zLjksMTFjLTMuMyw5LjMtNi43LDE4LjYtMTAsMjhjLTAuOSwyLjYtMC44LDUsMS4zLDdjMy4xLDIuOSw3LjksMS43LDkuNS0yLjUgYzEuOS01LjEsMy43LTEwLjMsNS42LTE1LjVjMS44LTUsMy42LTkuOSw1LjQtMTQuOWMwLjEsMCwwLjIsMCwwLjMsMC4xYy0wLjUsMi42LTEsNS4yLTEuNCw3LjdjLTIuMSwxMS4zLTQuMywyMi41LTYuNCwzMy44IGMtMC41LDIuNSwxLDQuMSwzLjUsNC4yYzEuMywwLDIuNywwLDQuMSwwYzAsMC44LDAsMS41LDAsMi4xYzAsMTMuMSwwLDI2LjIsMCwzOS4zYzAsMSwwLDIsMC4zLDIuOWMxLjEsNC4yLDUuNiw2LjQsOS42LDQuNiBjMy0xLjQsNC4yLTMuOCw0LjItN2MwLTEzLjMsMC0yNi42LDAtMzkuOWMwLTAuNiwwLTEuMiwwLTEuOWMxLjEsMCwyLjEsMCwzLjEsMGMwLDAuNywwLDEuNCwwLDJjMCwxMywwLDI2LDAsMzljMCwwLjcsMCwxLjQsMCwyIGMwLjUsNS4yLDYuMiw4LjEsMTAuNyw1LjRjMi40LTEuNSwzLjMtMy44LDMuMy02LjZjMC0xMy4zLDAtMjYuNiwwLTM5LjljMC0wLjYsMC0xLjIsMC0xLjljMS41LDAsMi45LDAsNC4yLDAgYzIuNCwwLDMuOS0xLjgsMy40LTQuMWMtMS44LTkuMS0zLjUtMTguMi01LjMtMjcuM2MtMC45LTQuOC0xLjgtOS42LTIuNy0xNC4zYzAuNSwwLjUsMC44LDEuMSwxLDEuOGMzLjMsOS4zLDYuNywxOC41LDEwLDI3LjggYzAuNCwxLjEsMSwyLjMsMS44LDMuMmMxLjgsMiw0LjksMi4yLDcuMSwwLjhDODIsMTAxLDgzLDk4LjMsODEuOSw5NS4zeiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTMuMSw0MS40YzMuMi0wLjMsNi41LTAuOCw5LjctMC44YzIuOSwwLDUuNS0wLjMsNi42LTMuMWMwLjksMC40LDEuOCwxLjEsMi4zLDAuOWMwLjgtMC4zLDEuMy0xLjIsMS45LTEuOSBjNi4xLDUuOCwxNS4xLDYuMSwyMS42LTAuMWMwLjYsMC43LDEsMS43LDEuNywxLjljMC43LDAuMiwxLjYtMC41LDIuNS0wLjljMSwyLjMsMywzLjEsNS43LDMuMWMzLjYsMC4xLDcuMSwwLjYsMTAuNywwLjggYzAuNCwwLDEtMC4xLDEuMi0wLjNjMC4yLTAuMywwLjItMC45LDAtMS4zYy0xLjgtMy42LTQuMS02LjctNy41LTljLTIuMS0xLjQtNC4zLTIuNi03LTEuM2MtMC4xLTIuNi0wLjctMy4xLTMuMS0yLjUgYzAuNS0xMC4xLTcuMy0xNi4zLTE1LTE2LjRjLTYuOS0wLjEtMTUuNCw1LjItMTUuMywxNi4zYy0yLjUtMC40LTMuMSwwLjEtMywyLjZjLTIuMy0xLjItNC4zLTAuNC02LjMsMC44IGMtMy44LDIuMy02LjMsNS42LTguMiw5LjVjLTAuMiwwLjMtMC4yLDEsMCwxLjFDMTIuMSw0MS40LDEyLjYsNDEuNSwxMy4xLDQxLjR6Ii8+IDwvZz4gPC9zdmc+", "boys": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDc4LjYgMTY4LjYiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDc4LjYgMTY4LjY7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4gPHN0eWxlIHR5cGU9InRleHQvY3NzIj4gLnN0MHtmaWxsOiMwMEFBMzI7fSA8L3N0eWxlPiA8Zz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTYyLjIsMjEuNmMxLjcsMCwyLjktMS4xLDIuOS0yLjZjMC0xLjUtMS4yLTIuNy0zLTIuN2MtMi43LDAtNS40LTAuMS04LjEsMGMtMSwwLTEuNS0wLjMtMS45LTEuMiBjLTEuNi0zLjUtNC4zLTYtNy45LTcuNGMtMS44LTAuNy0zLjYtMS4zLTQuNy0zYy0wLjUsMC0xLDAtMS42LDBjLTEuMiwxLjEtMi4xLDIuMi0zLjksMi42QzI4LDguOSwyMy40LDE1LjMsMjMuNywyMS42IGMwLjIsMCwwLjQsMC4xLDAuNiwwLjFDMzYuOSwyMS42LDQ5LjYsMjEuNiw2Mi4yLDIxLjZ6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik02Ny45LDYwLjNjMC0xLjItMC4yLTIuNS0wLjUtMy43Yy0xLjgtNi41LTYuOS0xMC40LTEzLjgtMTAuNGMtMTAsMC0xOS45LDAtMjkuOSwwYy04LjQsMC0xNC4zLDUuOS0xNC4zLDE0LjMgYy0wLjEsMTMuNi0wLjIsMjcuMS0wLjIsNDAuN2MwLDAuOCwwLDEuNiwwLjEsMi4zYzAuNiwzLDMuMSw0LjksNi4xLDQuN2MzLjItMC4yLDUuNC0yLjcsNS40LTYuNGMwLjEtMTMuNCwwLjEtMjYuOSwwLjItNDAuMyBjMC0xLTAuNS0yLjYsMS4yLTIuNWMxLjYsMCwxLDEuNiwxLDIuNWMwLDMxLjUsMCw2Mi45LDAsOTQuNGMwLDEsMCwyLjEsMC4zLDMuMWMwLjgsMy43LDQuNiw2LjEsOC4zLDUuMmMzLjUtMC45LDUuNC0zLjUsNS40LTcuNiBjMC0xNy42LDAtMzUuMiwwLTUyLjhjMC0wLjYsMC0xLjIsMC0xLjljMS4xLDAsMS45LDAsMywwYzAsMC43LDAsMS40LDAsMmMwLDE3LjMsMCwzNC42LDAsNTEuOWMwLDAuOCwwLDEuNywwLjEsMi41IGMwLjQsNCw0LjQsNi44LDguMyw1LjljMy41LTAuOCw1LjQtMy41LDUuNC03LjdjMC0zMS42LDAtNjMuMS0wLjEtOTQuN2MwLTAuNS0wLjItMS4xLDAtMS41YzAuMy0wLjYsMC44LTEsMS4yLTEuNSBjMC40LDAuNSwwLjksMC45LDEuMSwxLjRjMC4yLDAuNCwwLjEsMC45LDAuMSwxLjRjMCw5LDAuMSwxOCwwLjEsMjdjMCw0LjUsMCw5LDAuMSwxMy42YzAsMi45LDEuNCw1LDMuOCw1LjkgYzMuOSwxLjQsNy43LTEuMyw3LjctNS43QzY4LjEsODguMyw2OCw3NC4zLDY3LjksNjAuM3oiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTMwLjQsMzguNWM1LjYsMy40LDExLjQsMy41LDE2LjgtMC4yYzQuNC0zLDYuNi03LjQsNi41LTEyLjljLTEwLjEsMC0yMCwwLTMwLDBDMjMuMSwzMCwyNi4xLDM1LjgsMzAuNCwzOC41eiAiLz4gPC9nPiA8L3N2Zz4=", "women": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDE2MS44IDE2OC42IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAxNjEuOCAxNjguNjsiIHhtbDpzcGFjZT0icHJlc2VydmUiPiA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPiAuc3Qwe2ZpbGw6IzAwQUEzMjt9IDwvc3R5bGU+IDxnPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTE3LjUsMTEyLjljLTItNS00LjctOS42LTguMi0xMy43Yy0yLjYtMy4yLTUuNy01LjktOS4xLTguM2MtNC40LTMuMS05LjItNS4yLTE0LjQtNi4zIGMtNi4xLTEuMy0xMi4zLTEuMy0xOC41LDAuNWMtMy43LDEuMS03LjMsMi41LTEwLjYsNC41Yy0zLDEuOS01LjgsNC04LjQsNi42Yy0zLjIsMy4yLTUuOSw2LjgtOC4xLDEwLjdjLTMuNiw2LjQtNiwxMy4zLTYuNCwyMC42IGMtMC4zLDQuOS0wLjQsMTUuMy0wLjQsMjJjMCwzLjUsMi44LDYuMyw2LjMsNi4zYzE2LjIsMCw1OS4zLDAsNzUuNSwwYzMuNSwwLDYuMy0yLjgsNi4zLTYuM2MwLTQuOSwwLTExLjIsMC0xMy45IEMxMjEuNSwxMjcuOSwxMjAuNSwxMjAuMywxMTcuNSwxMTIuOXoiLz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTUzLjksNzguMmMxNS43LTAuMiwzMS40LTAuMSw0Ny4xLTAuMWMwLjcsMCwxLjQsMC4xLDItMC4xYzAuOC0wLjIsMS41LTAuNiwyLjEtMS4xYzEuNi0xLjMsMS45LTMuMSwxLjktNSBjMC04LjcsMC0xNy41LDAtMjYuMmMwLTcuMi0xLjUtMTQtNS4zLTIwLjJjLTMuMS01LTcuMi05LTEyLjQtMTEuNmMtMi40LTEuMi01LjEtMS43LTcuNy0yLjVjLTAuNS0wLjItMS4xLTAuMi0xLjctMC4zIGMtMS43LDAtMy4zLDAtNSwwYy0zLjgsMC43LTcuNCwxLjctMTAuOSwzLjZjLTMuNiwyLTYuNiw0LjctOS4xLDhjLTQuNyw2LjItNywxMy4zLTcuMSwyMS4xYy0wLjEsOS40LDAsMTguOS0wLjEsMjguMyBDNDcuOCw3NS40LDQ5LjcsNzguMiw1My45LDc4LjJ6IE01Ny45LDM5LjhjMTMsMCwyNS45LDAsMzksMGMwLjgsNC4zLDAuNiw4LjQtMC43LDEyLjVDOTUsNTYuMSw5Myw1OS41LDkwLDYyLjIgYy0xLjUsMS40LTMuMywyLjQtNS4xLDMuM2MtMy42LDEuOS03LjQsMi4yLTExLjMsMS4zYy0zLjYtMC45LTYuNy0yLjUtOS40LTUuMmMtMy4xLTMuMi01LjEtNi44LTYuMS0xMS4xIEM1Ny4zLDQ3LDU3LjMsNDMuNCw1Ny45LDM5Ljh6Ii8+IDwvZz4gPC9zdmc+", "men": "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIgdmlld0JveD0iMCAwIDE2MS44IDE2OC42IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAxNjEuOCAxNjguNjsiIHhtbDpzcGFjZT0icHJlc2VydmUiPiA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPiAuc3Qwe2ZpbGw6IzAwQUEzMjt9IDwvc3R5bGU+IDxnPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTIyLDEyNS4xYzAtNC0wLjQtOC4xLTEuMi0xMi4xYy00LjktMjUuNC0yNy45LTQyLjUtNTItMzcuNUM0OS4xLDc5LjcsMzMuMyw5OS4yLDMzLDEyMS4xIGMtMC4yLDExLjEsMC4xLDIxLjQsMC4zLDI3LjZjMC4xLDMuNCwyLjksNi4xLDYuMyw2LjFjMTIuMy0wLjEsMjYsMCwzNy43LDBjMTAsMCwyOC42LDAsMzguMSwwYzMuNCwwLDYuMS0yLjcsNi4yLTYgQzEyMS44LDE0My40LDEyMiwxMzQuOSwxMjIsMTI1LjF6Ii8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik03Ny4yLDY1YzE0LjYsMCwyNi43LTEyLjEsMjYuOC0yNi43YzAuMS0xNC45LTExLjctMjYuOS0yNi40LTI2LjljLTE0LjktMC4xLTI3LDExLjctMjcsMjYuMyBDNTAuNCw1Mi43LDYyLjQsNjUsNzcuMiw2NXoiLz4gPC9nPiA8L3N2Zz4="};
+
+const C = window.CONFIG;
+const IP = "Interpersonal EORE", MDM = "Digital and Mass Media EORE", TOT = "Training of Trainers", ALL = "All";
+const KEYS = ["year", "governorate", "implementing_org", "donor"];
+const SEX_AGE = [
+  { key: "girls", label: "Girls", v: "--s1", on: "--on-s1" },
+  { key: "boys",  label: "Boys",  v: "--s2", on: "--on-s2" },
+  { key: "women", label: "Women", v: "--s3", on: "--on-s3" },
+  { key: "men",   label: "Men",   v: "--s4", on: "--on-s4" },
+];
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const nf = new Intl.NumberFormat("en");
+const cf = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+const fmt = n => nf.format(Math.round(n || 0));
+const big = n => (n >= 100000 ? cf.format(n) : fmt(n));
+const pct = (a, b) => (b > 0 ? (100 * a / b) : 0);
+const pctTxt = (a, b) => (b > 0 ? `${pct(a, b) < 10 ? pct(a, b).toFixed(1) : Math.round(pct(a, b))}%` : "–");
+const $ = id => document.getElementById(id);
+const sum = (rows, k) => rows.reduce((s, r) => s + (+r[k] || 0), 0);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "style") e.style.cssText = v;
+    else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  }
+  for (const k of kids) if (k != null) e.append(k);
+  return e;
+}
+
+/* ---------------- tooltip ---------------- */
+const tip = $("tip");
+function showTip(evt, title, rows) {
+  tip.replaceChildren(el("div", { class: "t", text: title }),
+    ...rows.map(r => el("div", { class: "r" },
+      r.color ? el("i", { style: `background:var(${r.color})` }) : null,
+      el("b", { text: r.value }), el("span", { text: r.label }))));
+  let x, y;
+  if (evt.clientX != null && evt.type !== "focus") { x = evt.clientX; y = evt.clientY; }
+  else { const b = evt.target.getBoundingClientRect(); x = b.left + b.width / 2; y = b.top; }
+  tip.style.opacity = 1;
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x + 14)) + "px";
+  tip.style.top = Math.max(8, y - h - 12) + "px";
+}
+const hideTip = () => { tip.style.opacity = 0; };
+function hoverable(node, title, rows) {
+  node.tabIndex = 0;
+  const on = e => showTip(e, title, rows);
+  node.addEventListener("pointermove", on);
+  node.addEventListener("focus", on);
+  node.addEventListener("pointerleave", hideTip);
+  node.addEventListener("blur", hideTip);
+}
+
+/* ---------------- tables (every chart has one) ---------------- */
+const views = {};
+function setView(card, columns, rows) { views[card] = { columns, rows }; const c = document.querySelector(`[data-card="${card}"]`); if (c && !c.querySelector(".table").hidden) drawTable(card); }
+function drawTable(card) {
+  const box = document.querySelector(`[data-card="${card}"] .table`);
+  const v = views[card]; if (!v) return;
+  const thead = el("thead", {}, el("tr", {}, ...v.columns.map(c => el("th", { class: c.num ? "num" : "", text: c.label }))));
+  const tbody = el("tbody", {}, ...v.rows.map(r => el("tr", {}, ...v.columns.map(c => el("td", { class: c.num ? "num" : "", text: c.num ? fmt(r[c.key]) : String(r[c.key] ?? "") })))));
+  box.replaceChildren(el("div", { class: "tablewrap" }, el("table", {}, thead, tbody)));
+}
+document.querySelectorAll("[data-card] .tbl-btn").forEach(btn => btn.addEventListener("click", () => {
+  const card = btn.closest("[data-card]"), name = card.dataset.card;
+  const chart = card.querySelector(".chart"), table = card.querySelector(".table");
+  const toTable = table.hidden;
+  table.hidden = !toTable; chart.hidden = toTable;
+  btn.textContent = toTable ? "Chart" : "Table";
+  if (toTable) drawTable(name); else if (name === "map" && map) map.invalidateSize();
+}));
+
+/* ---------------- data loading ---------------- */
+async function fetchTable(id) {
+  const base = C.viewUrl.replace(/\/+$/, "");
+  const out = []; let offset = 0;
+  for (;;) {
+    const q = new URLSearchParams({ where: "1=1", outFields: "*", returnGeometry: "false", orderByFields: "OBJECTID",
+      resultOffset: offset, resultRecordCount: 2000, f: "json" });
+    const res = await fetch(`${base}/${id}/query?${q}`);
+    const j = await res.json();
+    if (j.error) throw new Error(j.error.message || "Query failed");
+    const feats = j.features || [];
+    out.push(...feats.map(f => f.attributes));
+    if (!j.exceededTransferLimit || !feats.length) break;
+    offset += feats.length;
+  }
+  return out;
+}
+const unpack = t => t.rows.map(r => Object.fromEntries(t.cols.map((c, i) => [c, r[i]])));
+async function load() {
+  if (C.viewUrl) {
+    const [summary, breakdown, coverage, meta] = await Promise.all(
+      ["summary", "breakdown", "coverage", "meta"].map(k => fetchTable(C.tables[k])));
+    const points = await fetchTable(C.tables.points).catch(() => null);   // null = older summary without points
+    return { summary, breakdown, coverage, meta: meta[0] || {}, points, demo: false };
+  }
+  if (window.EORE_DEMO) {
+    const d = window.EORE_DEMO;
+    return { summary: unpack(d.summary), breakdown: unpack(d.breakdown), coverage: unpack(d.coverage), meta: unpack(d.meta)[0],
+      points: d.points ? unpack(d.points) : null, demo: true };
+  }
+  throw new Error("No data source. Set CONFIG.viewUrl in index.html.");
+}
+
+/* ---------------- filters ---------------- */
+const F = { year: ALL, governorate: ALL, implementing_org: ALL, donor: ALL };
+let DATA = null, trendMetric = "benef_total";
+const match = r => KEYS.every(k => F[k] === ALL || String(r[k]) === F[k]);
+function buildFilters() {
+  for (const k of KEYS) {
+    const vals = [...new Set(DATA.summary.map(r => String(r[k])))].sort((a, b) => k === "year" ? b.localeCompare(a) : a.localeCompare(b));
+    const sel = $("f-" + k);
+    sel.replaceChildren(el("option", { value: ALL, text: k === "year" ? "All years" : "All" }), ...vals.map(v => el("option", { value: v, text: v })));
+    sel.value = F[k];
+    sel.onchange = () => { F[k] = sel.value; render(); };
+  }
+  $("reset").onclick = () => { KEYS.forEach(k => { F[k] = ALL; $("f-" + k).value = ALL; }); render(); };
+}
+
+/* ---------------- components ---------------- */
+function segmentedBar(box, legendBox, parts, total, name) {
+  box.replaceChildren(); legendBox.replaceChildren();
+  box.setAttribute("aria-label", `${name}: ` + parts.map(p => `${p.label} ${fmt(p.value)} (${pctTxt(p.value, total)})`).join(", "));
+  if (!total) { box.append(el("div", { style: "flex:1;background:var(--grid)" })); }
+  for (const p of parts) {
+    legendBox.append(el("span", {}, el("i", { style: `background:var(${p.v})` }), p.label));
+    if (!p.value) continue;
+    const label = el("span", { text: pctTxt(p.value, total), style: `color:var(${p.on})` });
+    const block = el("div", { style: `flex:${p.value} 1 0;background:var(${p.v})` }, label);
+    hoverable(block, p.label, [{ value: fmt(p.value), label: `people · ${pctTxt(p.value, total)}`, color: p.v }]);
+    box.append(block);
+  }
+  requestAnimationFrame(() => box.querySelectorAll("span").forEach(s => {
+    s.style.visibility = (s.scrollWidth + 16 > s.parentElement.clientWidth) ? "hidden" : "visible";
+  }));
+}
+
+function rankedBars(box, items, { unit = "", max = 8, valueKey = "value", tipExtra } = {}) {
+  box.replaceChildren();
+  items = items.filter(d => d[valueKey] > 0).sort((a, b) => b[valueKey] - a[valueKey]);
+  if (!items.length) { box.append(el("div", { class: "empty", text: "No data for this selection" })); return; }
+  if (items.length > max) {
+    const rest = items.slice(max - 1);
+    items = items.slice(0, max - 1).concat([{ label: `Other (${rest.length})`, [valueKey]: sum(rest, valueKey),
+      extra: sum(rest, "extra") }]);
+  }
+  const top = Math.max(...items.map(d => d[valueKey]));
+  const rows = el("div", { class: "rows" });
+  for (const d of items) {
+    const row = el("div", { class: "row" },
+      el("div", { class: "lab", text: d.label, title: d.label }),
+      el("div", { class: "trk" }, el("div", { class: "bar", style: `width:calc((100% - 56px) * ${d[valueKey] / top})` }),
+        el("span", { class: "val", text: big(d[valueKey]) })));
+    const tipRows = [{ value: fmt(d[valueKey]), label: unit, color: "--s1" }];
+    if (tipExtra) tipRows.push(tipExtra(d));
+    hoverable(row, d.label, tipRows);
+    rows.append(row);
+  }
+  box.append(rows);
+}
+
+function stackedBars(box, items, series = SEX_AGE, { sort = true } = {}) {
+  box.replaceChildren();
+  items = items.filter(d => d.total > 0);
+  if (sort) items.sort((a, b) => b.total - a.total);
+  if (!items.length) { box.append(el("div", { class: "empty", text: "No data for this selection" })); return; }
+  const top = Math.max(...items.map(d => d.total));
+  const rows = el("div", { class: "rows" });
+  for (const d of items) {
+    const stack = el("div", { class: "stack", style: `width:calc((100% - 56px) * ${d.total / top})` },
+      ...series.filter(s => d[s.key] > 0).map(s => el("div", { style: `flex:${d[s.key]} 1 0;background:var(${s.v})` })));
+    const row = el("div", { class: "row" }, el("div", { class: "lab", text: d.label, title: d.label }),
+      el("div", { class: "trk" }, stack, el("span", { class: "val", text: big(d.total) })));
+    hoverable(row, `${d.label} · ${fmt(d.total)} people`,
+      series.map(s => ({ value: fmt(d[s.key]), label: `${s.label} (${pctTxt(d[s.key], d.total)})`, color: s.v })));
+    rows.append(row);
+  }
+  box.append(rows);
+}
+
+function niceMax(v) { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p; }
+function columnChart(box, items, unit) {
+  box.replaceChildren();
+  if (!items.length) { box.append(el("div", { class: "empty", text: "No data for this selection" })); return; }
+  const W = Math.max(280, box.clientWidth), H = 352, m = { t: 12, r: 8, b: 40, l: 44 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const ymax = niceMax(Math.max(...items.map(d => d.value)));
+  const band = iw / items.length, bw = Math.max(2, Math.min(24, band * 0.62));
+  const NS = "http://www.w3.org/2000/svg";
+  const s = (tag, a = {}) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const svg = s("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, class: "colchart", role: "img",
+    "aria-label": `${unit} by month` });
+  const tickFmt = v => (ymax >= 10000 ? cf.format(v) : nf.format(v));
+  for (let i = 0; i <= 4; i++) {
+    const v = ymax * i / 4, y = m.t + ih - ih * i / 4;
+    svg.append(s("line", { x1: m.l, x2: W - m.r, y1: y, y2: y, stroke: css(i ? "--grid" : "--axis"), "stroke-width": 1 }));
+    const t = s("text", { x: m.l - 8, y: y + 4, "text-anchor": "end" }); t.textContent = tickFmt(v); svg.append(t);
+  }
+  const every = Math.ceil(items.length / Math.max(1, Math.floor(iw / 44)));
+  items.forEach((d, i) => {
+    const x = m.l + band * i + (band - bw) / 2, h = ih * d.value / ymax, y = m.t + ih - h, r = Math.min(4, h, bw / 2);
+    const hit = s("rect", { x: m.l + band * i, y: m.t, width: band, height: ih, class: "hit", tabindex: 0 });
+    const col = h > 0 ? s("path", { class: "col", fill: css("--green"),
+      d: `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + bw - r}Q${x + bw},${y} ${x + bw},${y + r}V${y + h}Z` }) : s("g");
+    svg.append(hit, col);
+    hoverable(hit, d.title, [{ value: fmt(d.value), label: unit, color: "--s1" }, ...(d.extra ? [d.extra] : [])]);
+    if (i % every === 0 || d.month === 1) {
+      const t = s("text", { x: m.l + band * i + band / 2, y: H - m.b + 16, "text-anchor": "middle" });
+      t.textContent = MONTHS[d.month - 1]; svg.append(t);
+    }
+    if (d.month === 1 || i === 0) {
+      const t = s("text", { x: m.l + band * i + band / 2, y: H - m.b + 31, "text-anchor": "middle", style: "fill:var(--ink-2);font-weight:600" });
+      t.textContent = d.year; svg.append(t);
+    }
+  });
+  box.append(svg);
+}
+
+/* ---------------- map ---------------- */
+let map = null, tiles = null, dots = null;
+function mapTheme() {
+  if (!map || tiles) return;
+  // Esri World Light Gray Canvas (no key needed); falls back to OpenStreetMap if it can't load
+  const esri = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_";
+  tiles = L.layerGroup([
+    L.tileLayer(esri + "Base/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "Esri, HERE, Garmin, &copy; OpenStreetMap contributors" }),
+    L.tileLayer(esri + "Reference/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16 })
+  ]).addTo(map);
+  let failed = 0;
+  tiles.eachLayer(l => l.on("tileerror", () => {
+    if (++failed !== 8) return;
+    map.removeLayer(tiles);
+    tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 16,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(map);
+  }));
+}
+function drawMap(items, isPoints, ipRows) {
+  const box = $("map");
+  if (!window.L) { box.replaceChildren(el("div", { class: "empty", text: "Map could not load. Use the Table view." })); return; }
+  if (!map) {
+    map = L.map(box, { scrollWheelZoom: false, zoomControl: true, attributionControl: true }).setView([35, 38.5], 6);
+    mapTheme(); dots = L.layerGroup().addTo(map);
+  }
+  dots.clearLayers();
+  const pts = items.filter(d => d.lat != null && d.lon != null && d.value > 0);
+  let missing = 0;
+  if (isPoints) missing = Math.max(0, sum(ipRows, "benef_total") - sum(pts, "value"));
+  else missing = sum(items.filter(d => (d.lat == null || d.lon == null) && d.value > 0), "value");
+  $("map-note").textContent = missing ? `${fmt(missing)} people were reached in sessions with no location in the report, so they aren't on the map.` : "";
+  if (!pts.length) return;
+  const top = Math.max(...pts.map(d => d.value));
+  const color = css("--green"), ring = "#FFFFFF";
+  pts.sort((a, b) => b.value - a.value).forEach(d => {
+    const c = L.circleMarker([d.lat, d.lon], { radius: (isPoints ? 4 : 5) + (isPoints ? 14 : 20) * Math.sqrt(d.value / top), color: ring,
+      weight: isPoints ? 1 : 2, fillColor: color, fillOpacity: isPoints ? 0.7 : 0.55 });
+    const t = document.createElement("div");
+    t.append(el("div", { style: "margin-bottom:2px", text: `${d.district}, ${d.governorate}` }),
+      el("div", {}, el("b", { text: fmt(d.value) }), " people reached"),
+      el("div", { style: "color:var(--ink-2)", text: `${fmt(d.sessions)} sessions` }));
+    c.bindTooltip(t, { direction: "top", offset: [0, -4] });
+    dots.addLayer(c);
+  });
+  map.fitBounds(L.latLngBounds(pts.map(d => [d.lat, d.lon])).pad(0.15), { maxZoom: isPoints ? 12 : 8 });
+}
+
+/* ---------------- render ---------------- */
+function groupBy(rows, keyFn, agg) {
+  const m = new Map();
+  for (const r of rows) { const k = keyFn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
+  return [...m].map(([k, rs]) => agg(k, rs));
+}
+function render() {
+  const rows = DATA.summary.filter(match);
+  const ip = rows.filter(r => r.activity_type === IP), mdm = rows.filter(r => r.activity_type === MDM), tot = rows.filter(r => r.activity_type === TOT);
+  const sessions = sum(ip, "n_activities"), benef = sum(ip, "benef_total");
+  const covKey = r => KEYS.every(k => String(r[k]) === F[k]);
+  const cov = DATA.coverage.find(covKey) || { n_governorates: 0, n_districts: 0, n_communities: 0 };
+
+  $("k-benef").textContent = fmt(benef);
+  $("k-benef-meta").textContent = sessions ? `in ${fmt(sessions)} sessions · ${(benef / sessions).toFixed(1)} people per session` : "No sessions for this selection";
+  $("k-sessions").textContent = fmt(sessions);
+  const newS = sum(ip, "new_sessions");
+  $("k-sessions-meta").textContent = sessions ? `${pctTxt(newS, sessions)} new · ${pctTxt(sessions - newS, sessions)} refresher` : "";
+  const first = sum(ip, "first_time");
+  $("k-first").textContent = fmt(first);
+  $("k-first-meta").textContent = `${pctTxt(first, benef)} of people reached`;
+  const dis = sum(ip, "dis_total");
+  $("k-dis").textContent = fmt(dis);
+  $("k-dis-meta").textContent = `${pctTxt(dis, benef)} of people reached · in ${pctTxt(sum(ip, "sessions_with_dis"), sessions)} of sessions`;
+  $("k-comm").textContent = fmt(cov.n_communities);
+  $("k-comm-meta").textContent = `in ${fmt(cov.n_districts)} districts, ${fmt(cov.n_governorates)} governorates`;
+  const eo = sum(ip, "eo_reported");
+  $("k-eo").textContent = fmt(eo);
+  $("k-eo-meta").textContent = `${pctTxt(eo, sessions)} of sessions · community reports of explosive ordnance`;
+  $("k-mat").textContent = big(sum(ip, "materials"));
+  $("k-mat-meta").textContent = `${big(sum(ip, "leaflets"))} leaflets · ${big(sum(ip, "booklets"))} booklets · ${big(sum(ip, "posters"))} posters · ${big(sum(ip, "other_materials"))} other`;
+  const trained = sum(tot, "tot_total");
+  $("k-tot").textContent = fmt(trained);
+  const nTot = sum(tot, "n_activities");
+  $("k-tot-meta").textContent = nTot ? `${fmt(nTot)} training${nTot === 1 ? "" : "s"} · ${pctTxt(sum(tot, "tot_female"), trained)} female` : "No trainings reported for this selection";
+  const reach = sum(mdm, "mdm_reach");
+  $("k-mdm").textContent = big(reach);
+  const nMdm = sum(mdm, "n_activities");
+  $("k-mdm-meta").textContent = !nMdm ? "No media activities reported for this selection"
+    : reach ? `estimated, ${fmt(nMdm)} activit${nMdm === 1 ? "y" : "ies"} · not added to people reached`
+    : `${fmt(nMdm)} activit${nMdm === 1 ? "y" : "ies"} reported, no reach estimate entered`;
+
+  // sex & age
+  const sa = SEX_AGE.map(s => ({ ...s, value: sum(ip, s.key) }));
+  segmentedBar($("sexage"), $("sexage-legend"), sa, benef, "People reached by sex and age");
+  // legend with numbers on the hero
+  [...$("sexage-legend").children].forEach((n, i) => n.append(el("b", { text: pctTxt(sa[i].value, benef) })));
+  for (const p of sa) { $("k-" + p.key).textContent = fmt(p.value); $("k-" + p.key + "-meta").textContent = `${pctTxt(p.value, benef)} of beneficiaries`; }
+
+  // trend
+  const byMonth = groupBy(ip, r => r.year * 100 + r.month, (k, rs) => ({ k, year: Math.floor(k / 100), month: k % 100,
+    benef_total: sum(rs, "benef_total"), n_activities: sum(rs, "n_activities") }));
+  const months = [];
+  if (byMonth.length) {
+    const ks = byMonth.map(d => d.k), lo = Math.min(...ks), hi = Math.max(...ks), idx = new Map(byMonth.map(d => [d.k, d]));
+    for (let y = Math.floor(lo / 100), mth = lo % 100; y * 100 + mth <= hi; mth === 12 ? (y++, mth = 1) : mth++) {
+      const d = idx.get(y * 100 + mth) || { year: y, month: mth, benef_total: 0, n_activities: 0 };
+      months.push({ ...d, year: y, month: mth });
+    }
+  }
+  const unit = trendMetric === "benef_total" ? "people reached" : "sessions";
+  columnChart($("trend"), months.map(d => ({ year: d.year, month: d.month, value: d[trendMetric], title: `${MONTHS[d.month - 1]} ${d.year}`,
+    extra: { value: fmt(trendMetric === "benef_total" ? d.n_activities : d.benef_total), label: trendMetric === "benef_total" ? "sessions" : "people reached" } })), unit);
+  setView("trend", [{ key: "period", label: "Month" }, { key: "n_activities", label: "Sessions", num: true }, { key: "benef_total", label: "People reached", num: true }],
+    months.map(d => ({ ...d, period: `${MONTHS[d.month - 1]} ${d.year}` })));
+
+  // map: one circle per EORE session location (falls back to district points for older summaries)
+  let mapItems;
+  if (DATA.points) {
+    mapItems = groupBy(DATA.points.filter(match), r => `${r.lat},${r.lon}`, (k, rs) => ({ district: rs[0].district,
+      governorate: rs[0].governorate, lat: rs[0].lat, lon: rs[0].lon, value: sum(rs, "benef_total"), sessions: sum(rs, "n_activities") }));
+    $("map-sub").textContent = "Each circle is an EORE session location; size = people reached";
+  } else {
+    mapItems = groupBy(ip, r => `${r.governorate}|${r.district}`, (k, rs) => ({ governorate: rs[0].governorate, district: rs[0].district,
+      lat: rs.find(r => r.district_lat != null)?.district_lat, lon: rs.find(r => r.district_lon != null)?.district_lon,
+      value: sum(rs, "benef_total"), sessions: sum(rs, "n_activities") }));
+  }
+  drawMap(mapItems, !!DATA.points, ip);
+  setView("map", [{ key: "governorate", label: "Governorate" }, { key: "district", label: "District" }, { key: "lat", label: "Latitude" }, { key: "lon", label: "Longitude" },
+    { key: "sessions", label: "Sessions", num: true }, { key: "value", label: "People reached", num: true }], [...mapItems].sort((a, b) => b.value - a.value));
+
+  // governorate stacked
+  const byGov = groupBy(ip, r => r.governorate, (k, rs) => ({ label: k, total: sum(rs, "benef_total"), ...Object.fromEntries(SEX_AGE.map(s => [s.key, sum(rs, s.key)])) }));
+  $("gov-legend").replaceChildren(...SEX_AGE.map(s => el("span", {}, el("i", { style: `background:var(${s.v})` }), s.label)));
+  stackedBars($("gov"), byGov);
+  setView("gov", [{ key: "label", label: "Governorate" }, ...SEX_AGE.map(s => ({ key: s.key, label: s.label, num: true })), { key: "total", label: "Total", num: true }],
+    [...byGov].sort((a, b) => b.total - a.total));
+
+  // breakdowns
+  const bd = DATA.breakdown.filter(match);
+  const dim = (name, act) => groupBy(bd.filter(r => r.dimension === name && (!act || r.activity_type === act)), r => r.category,
+    (k, rs) => ({ label: k, n: sum(rs, "n_activities"), people: sum(rs, "beneficiaries") }));
+  const bdView = (card, items, labelName, nName, pName = "People") => setView(card, [{ key: "label", label: labelName }, { key: "n", label: nName, num: true }, { key: "people", label: pName, num: true }], [...items].sort((a, b) => b.n - a.n));
+  const byPeople = (card, items, unit, extraLabel) => rankedBars($(card), items.map(d => ({ label: d.label, value: d.people, extra: d.n })), { unit, tipExtra: d => ({ value: fmt(d.extra), label: extraLabel }) });
+  const bySessions = (card, items, unit, extraLabel, extraFmt = fmt) => rankedBars($(card), items.map(d => ({ label: d.label, value: d.n, extra: d.people })), { unit, max: 10, tipExtra: d => ({ value: extraFmt(d.extra), label: extraLabel }) });
+
+  const venue = dim("session_conducted", IP);
+  bySessions("venue", venue, "sessions", "people reached"); bdView("venue", venue, "Venue", "Sessions");
+  const pop = dim("population_group", IP);
+  byPeople("population", pop, "people reached", "sessions"); bdView("population", pop, "Population group", "Sessions");
+  const st = dim("sub_activity", IP);
+  bySessions("stype", st, "sessions", "people reached"); bdView("stype", st, "Activity", "Sessions");
+  const risk = dim("at_risk_group", IP);
+  rankedBars($("atrisk"), risk.map(d => ({ label: d.label, value: d.people, extra: d.n })), { unit: "people reached", max: 14, tipExtra: d => ({ value: fmt(d.extra), label: "sessions" }) }); bdView("atrisk", risk, "Group", "Sessions");
+  const hz = dim("awareness_type_impacted_communities", IP);
+  bySessions("hazards", hz, "sessions", "people reached"); bdView("hazards", hz, "Hazard", "Sessions");
+  const med = dim("sub_activity", MDM);
+  bySessions("media", med, "activities", "estimated reach", big); bdView("media", med, "Channel", "Activities", "Estimated reach");
+  const tr = dim("re_category", TOT);
+  byPeople("tot", tr, "people trained", "trainings"); bdView("tot", tr, "Training", "Trainings", "People trained");
+
+  const orgs = groupBy(ip, r => r.implementing_org, (k, rs) => ({ label: k, value: sum(rs, "benef_total"), extra: sum(rs, "n_activities") }));
+  rankedBars($("orgs"), orgs, { unit: "people reached", max: 10, tipExtra: d => ({ value: fmt(d.extra), label: "sessions" }) });
+  setView("orgs", [{ key: "label", label: "Team" }, { key: "extra", label: "Sessions", num: true }, { key: "value", label: "People reached", num: true }], [...orgs].sort((a, b) => b.value - a.value));
+
+  // age groups
+  const AGE = [["Children 5–11", "children"], ["Youth 12–17", "youth"], ["Adults 18–59", "adult"], ["Elders 60+", "elder"]];
+  const SEX2 = [{ key: "f", label: "Female", v: "--s1" }, { key: "m", label: "Male", v: "--s2" }];
+  const ages = AGE.map(([label, k]) => { const f = sum(ip, k + "_f"), m = sum(ip, k + "_m"); return { label, f, m, total: f + m }; });
+  $("age-legend").replaceChildren(...SEX2.map(s => el("span", {}, el("i", { style: `background:var(${s.v})` }), s.label)));
+  stackedBars($("age"), ages, SEX2, { sort: false });
+  setView("age", [{ key: "label", label: "Age group" }, { key: "f", label: "Female", num: true }, { key: "m", label: "Male", num: true }, { key: "total", label: "Total", num: true }], ages);
+
+  // disability
+  const disParts = SEX_AGE.map(s => ({ ...s, value: sum(ip, "dis_" + s.key) }));
+  const disBox = $("dis"); disBox.replaceChildren();
+  if (dis) {
+    const sb = el("div", { class: "segbar" }), lg = el("div", { class: "legend" });
+    disBox.append(el("div", { style: "font-size:28px;font-weight:650;margin:0 0 10px" }, fmt(dis),
+      el("span", { style: "font-size:13px;font-weight:400;color:var(--ink-2);margin-left:8px", text: `${pctTxt(dis, benef)} of people reached` })), sb, lg);
+    segmentedBar(sb, lg, disParts, dis, "Persons with disabilities by sex and age");
+    [...lg.children].forEach((n, i) => n.append(el("b", { text: fmt(disParts[i].value) })));
+  } else disBox.append(el("div", { class: "empty", text: "No persons with disabilities reported for this selection" }));
+  setView("dis", [{ key: "label", label: "Group" }, { key: "value", label: "Persons with disabilities", num: true }], disParts);
+
+}
+
+/* ---------------- boot ---------------- */
+document.querySelectorAll("[data-metric]").forEach(b => b.addEventListener("click", () => {
+  trendMetric = b.dataset.metric;
+  document.querySelectorAll("[data-metric]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  render();
+}));
+let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => DATA && render(), 150); });
+
+for (const [k, v] of Object.entries(C.filterLabels || {})) { const n = $("l-" + k); if (n) n.textContent = v; }
+$("title").textContent = C.title; $("subtitle").textContent = C.subtitle;
+document.querySelectorAll("img[data-icon]").forEach(img => { img.src = ICONS[img.dataset.icon] || ""; });
+if (C.logo) { const lg = $("logo"); lg.onload = () => { lg.hidden = false; }; lg.onerror = () => { lg.hidden = true; }; lg.src = C.logo; }
+document.title = C.title;
+$("app").classList.add("loading");
+load().then(d => {
+  DATA = d;
+  if (d.demo) { const b = $("banner"); b.hidden = false; b.textContent = "Demo data: these numbers are made up. Set CONFIG.viewUrl in index.html to show your real figures."; }
+  const m = d.meta || {};
+  if (m.last_updated) $("updated").textContent = `· Updated ${new Date(m.last_updated).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+  if (m.first_activity) $("meta-line").textContent = `Activities from ${m.first_activity} to ${m.last_activity}.`;
+  buildFilters(); render();
+}).catch(err => {
+  const b = $("banner"); b.hidden = false; b.textContent = "Could not load data: " + err.message;
+}).finally(() => $("app").classList.remove("loading"));
+})();
+</script>
+</body>
+</html>
